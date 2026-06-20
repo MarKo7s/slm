@@ -1,0 +1,7 @@
+{
+    "meadowlark": {
+        "resolution": [1920, 1152],
+        "pixel_pitch_um": 9.2,
+        "bit_depth": 8
+    }
+}

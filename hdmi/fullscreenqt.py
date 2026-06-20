@@ -1,19 +1,22 @@
 
 import sys
-from PyQt5 import QtGui, QtCore, QtWidgets
+from PySide6 import QtGui, QtCore, QtWidgets
 import numpy as np
 import time
+
 
 class FullscreenWindow(QtWidgets.QWidget):
     def __init__(self, screen=0, parent=None):
         """Fullscreen widget that draws a numpy array to the screen"""
         QtWidgets.QWidget.__init__(self,parent) 
 
-        qdw = QtWidgets.QDesktopWidget()
-        rect = qdw.screenGeometry(screen=screen)    
-        print(rect.height(),rect.width())
+        screens = QtWidgets.QApplication.screens()
+        if screen >= len(screens):
+            screen = 0
+        rect = screens[screen].geometry()
+        print("Display size (Y,X): ",rect.height(),rect.width())
         self.setGeometry(rect)
-
+    
         self.setWindowFlags(QtCore.Qt.WindowStaysOnTopHint)
         self.setWindowFlags(QtCore.Qt.FramelessWindowHint)
 
@@ -52,11 +55,7 @@ class FullscreenWindow(QtWidgets.QWidget):
     def getBuffer(self):
         img = self.qimg
         ptr = self.qimg.bits()
-        ptr.setsize(self.qimg.byteCount())
-
-        
-        ## view the data as a writable numpy array
-        arr = np.asarray(ptr).reshape(img.height(), img.width(), self.qimg.depth()//8)
+        arr = np.frombuffer(ptr, np.uint8).reshape(img.height(), img.width(), self.qimg.depth()//8)
         return arr
 
 if __name__ == '__main__':
@@ -73,7 +72,7 @@ if __name__ == '__main__':
     arraytoedit[:,1920//2:,0] = 255
     fs.update()
 
-    app.exec_()
+    app.exec()
 
         
 

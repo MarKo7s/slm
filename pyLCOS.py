@@ -1,20 +1,30 @@
-import fullscreenqt
 import numpy as np
 import numexpr as ne
 import time
 #ne.set_num_threads(16) # I am not useing large set of arrays so 8 seems the best
 
 import sys
-sys.path.append("C:\LAB\Coding\Python\MODULES")
-import mark_lib as mkl
+#sys.path.append("C:\LAB\Coding\Python\MODULES")
+#import mark_lib as mkl
 
+import pathlib
+p = pathlib.Path(__file__).parent.parent
+path_to_module = p
+#print(path_to_module)
+sys.path.append(str(path_to_module))
 
-class LCOS(fullscreenqt.FullscreenWindow):
-    def __init__(self, screen = 1, pixel_size = 9.2e-6, aperture_diameter = 7.5e-3, mask_size = (960,960), MODELAB_COMPATIBILITY = True, **kwargs):
+#If I do not do from folder.fullscreenqt import module, super(). will fail when LCOS called from other module -- I do not know what the F*** is happeing
+from hdmi.fullscreenqt import FullscreenWindow
+from utilities.read_specs import load_slm_specs
+from utilities.displays import find_display, display_discovery
+
+class LCOS(FullscreenWindow):
+    def __init__(self, screen = 1, channel = 0, pixel_size = 9.2e-6, aperture_diameter = 7.5e-3, mask_size = (960,960), MODELAB_COMPATIBILITY = True,  **kwargs):
         """_summary_
 
         Args:
             screen (int, optional): index of the monitor to be used to display the FULL MASKS. Defaults to 1.
+            channel (int, optional): channel to be used to display the mask (red, green, blue) as (0, 1, 2). Defaults to 0 (red).
             pixel_size (_type_, optional): pixel pitch of the SLM. Defaults to 9.2e-6.
             aperture_diameter (_type_, optional): Diemater of the aperture to used to crop the masks in m. Defaults to 7.5e-3.
             mask_size (tuple, optional): size of the independed mask provided (zernikes H and V, patterns ...). Defaults to (960,960).
@@ -26,9 +36,16 @@ class LCOS(fullscreenqt.FullscreenWindow):
                 zernike_H (array), zernike_V (array), pattern_H (array), pattern_V(array), HmaskCenter ([x,y]), VmaskCenter([x,y]), 
                 polselect('H', 'V' or 'HV'), zernikesEnabled (0 or 1), patternEnabled (0 or 1)
         """
-        super().__init__(screen = screen) #This innit the screen, from now we
+
+        #Auto detection based on the slm model
+        if type(screen) == str:
+            screen = self._screen_autodetect(screen)
+
+        self.display  = screen #use the index to connect
+        super().__init__(screen = self.display) #This innit the screen
         
-        self.screen_data = self.getBuffer() #(Y,X,RGB)
+        self.screen_data = self.getBuffer() #(Y,X,RGB) --> From FullScreeWindow class
+        self.ch = channel
         self.LCOSsize = self.screen_data.shape[0:2]
         self.pixel_size  = pixel_size
         self.aperture_diameter = aperture_diameter
@@ -54,9 +71,17 @@ class LCOS(fullscreenqt.FullscreenWindow):
         #This are the avaliable kwargs. If they are not provided defaulted to above value
         INITPARAMETERS = {'zernikeH': zernikeH, 'zernikeV': zernikeV, 'patternH': patternH, 'patternV': patternV, 'HmaskCenter': HmaskCenter,
                      'VmaskCenter': VmaskCenter, 'polEnabled': 'HV', 'zernikesEnabled': 1, 'patternEnabled': 1} 
-        
+        #Fill custom diccionary with which provided by the user
         for arg in kwargs:
-            INITPARAMETERS[arg] = kwargs[arg] #INIT with user specs
+            try:
+                #only if exist the init parameter fill it
+                if arg in INITPARAMETERS:
+                    INITPARAMETERS[arg] = kwargs[arg] #INIT with user specs
+                else:
+                    print(arg, "could not be initialized because it is not supported")
+            except KeyError:
+                print(arg, "could not be initialized")
+                
         
         Hmask_specs = {'zernike':INITPARAMETERS['zernikeH'], 'pattern': INITPARAMETERS['patternH'], 'att_enabled':0, 'attWeight': 0, 'centers': INITPARAMETERS['HmaskCenter']}
         Vmask_specs = {'zernike':INITPARAMETERS['zernikeV'], 'pattern': INITPARAMETERS['patternV'], 'att_enabled':0, 'attWeight': 0, 'centers': INITPARAMETERS['VmaskCenter']} 
@@ -83,8 +108,9 @@ class LCOS(fullscreenqt.FullscreenWindow):
         self.ap_H = None
         self.ap_V = None
         self.ap = None
-        self.defineCenters()
-        self.calcApertures() #This method should be call each time, centers aperture diameter and pixel size changes
+        #self._defineCenters()
+        self.ApertureCalculator = Aperture(self.aperture_diameter, self.LCOSsize, self.pixel_size)
+        #self._calcApertures() #This method should be call each time, centers aperture diameter and pixel size changes
                     
         # Added masks 
         self.Hmask = None # Result of adding Hmask_specs
@@ -97,22 +123,30 @@ class LCOS(fullscreenqt.FullscreenWindow):
         self.refreshfreq = 0
         
         #Call setmask()??
+        self.setmask(update_centers = True)
     
-    @staticmethod
-    def getAngle(cmplxarray):
-        im = cmplxarray.imag
-        re = cmplxarray.real
-        cc = ne.evaluate('arctan2(im,re)')
-        return(cc)
-    
-    def calcApertures(self):
-        self.ap_H = self.aperture(self.aperture_diameter,self.Hcenter,self.LCOSsize,self.pixel_size)
-        self.ap_V = self.aperture(self.aperture_diameter,self.Vcenter,self.LCOSsize,self.pixel_size)
-        self.ap = np.logical_or(self.ap_H,self.ap_V)
+    def _screen_autodetect(self, screen):
+        """Auto detect the screen to use.
+        """
+        slm_specs = load_slm_specs()
+        connected_displays = display_discovery()
+        target_screen = slm_specs.get(screen, None) #type: ignore
+        if target_screen is not None:
+            w,h = target_screen["resolution"]
+            print(f'Target slm "{screen}" found with resolution {w}x{h}')
+        else:
+            raise ValueError(f"Screen {screen} not found in slm_specs.json")
 
-    def defineCenters(self):
+        screen = find_display(connected_displays, w = w, h = h) #get the monitor index
+
+        return screen
+        
+    def _calcApertures(self):
+        self.ap_H, self.ap_V, self.ap = self.ApertureCalculator.calculate_apertures(self.Hcenter, self.Vcenter)
+
+    def _defineCenters(self):
         cH = self.mask_specs['H']['centers']
-        cV =  self.mask_specs['V']['centers'] 
+        cV =  self.mask_specs['V']['centers'] #type: ignore
         
         if self.ModeLab == True:
             #Convert to integer in case somebody used floats
@@ -130,16 +164,10 @@ class LCOS(fullscreenqt.FullscreenWindow):
         self.Vcenter = [cV[0] - self.offset_center, cV[1] - self.offset_center]
     
             
-    def setCenters(self, centerH, centerV): #[x,y] format
-        self.mask_specs['H']['centers'] = centerH
-        self.mask_specs['V']['centers'] = centerV
-        self.defineCenters()
-        self.calcApertures()
-          
-    def addMasks(self):
-        
-        #Around 20 ms to run this piece of code when all masks have information (if some masks are 0 gets faster)
-        
+    #Around 20 ms to run this piece of code when all masks have information (if some masks are 0 gets faster)
+    def _addMasks(self):
+        """ Goes through all masks parameters and adds them together. It does it for H and V pols separately.
+        """
         att_phi_H = self.CalcAttPhase(self.mask_specs['H']['attWeight'])
         att_phi_V = self.CalcAttPhase(self.mask_specs['V']['attWeight'])
                 
@@ -149,7 +177,7 @@ class LCOS(fullscreenqt.FullscreenWindow):
         b = self.mask_specs['H']['pattern']  #This shohould come as -pi to pi
         b1 =  self.patternEnabled
         
-        c = self.attenuationPattern # array from -0.5 to -0.5
+        c = self.attenuationPattern # array from -0.5pi to 0.5pi for a total of pi phase attenuation
         c1 = self.mask_specs['H']['att_enabled'] * att_phi_H # attenuation weight should go from -attphi/2 to attphi/2 to avoid pistoning effect 
                
         d = self.mask_specs['V']['zernike']
@@ -166,8 +194,15 @@ class LCOS(fullscreenqt.FullscreenWindow):
         self.Vmask = self.getAngle(ne.evaluate('exp(1j*((d*d1) + (e*e1) + (f*f1)))'))  
     
     #Around 5 ms for this piece of code
-    def masksToLCOS(self, mask_h = 0 , mask_v = 0, pol='HV'):
-           
+    def _masksToLCOS(self, mask_h = 0 , mask_v = 0, pol='HV'):
+        """It put the indiviaul H and V masks on the LCOS array. It also applies the aperture filter.
+
+        Args:
+            mask_h (array): H mask
+            mask_v (array): V mask
+            pol (str): 'H', 'V' or 'HV'
+        """
+
         slmX = self.LCOSsize[1]
         slmY = self.LCOSsize[0]
         
@@ -196,49 +231,92 @@ class LCOS(fullscreenqt.FullscreenWindow):
            b = self.ap_H 
            c = self.LCOS_array_V
            d = self.ap_V
-           self.LCOS_array = (ne.evaluate('((a*b + c*d))'))
+           self.LCOS_array = (ne.evaluate('((a*b + c*d))')) # the aperture is applied at each pol already
            self.apertureApplied = self.ap  
 
+    def _update_centers(self):
+        """Update the centers (recalulate centers and apertures) from specs.
+        """
+        #When center are updated, we need to clean up the LCoS array
+        self.LCOS_array_H.fill(0)
+        self.LCOS_array_V.fill(0)
+        self.LCOS_array.fill(0)
+        self._defineCenters()
+        self._calcApertures()
+
     #To write into the LCOS
-    def LCOS_Display(self, arr_data, ch = 0):
-        self.screen_data[:,:,ch] = arr_data
+    def LCOS_Display(self, arr_data, ch = None):
+        if ch is None:
+            ch = self.ch
+        self.screen_data[: , :, ch] = arr_data
         self.update()
     
-    def LCOS_Clean(self):
-        self.LCOS_Display(np.zeros(self.LCOSsize))
+    def LCOS_Clean(self, ch = None):
+        """ Clean the LCOS screen. If ch is None, clean all channels. If ch is provided, clean only the specified channel.
+        """
+        if ch is None:
+            self.screen_data[: , :, :] *= 0
+        else:
+            self.screen_data[: , :, ch] *= 0
+
+        self.update()
+
+    def setCenters(self, centerH, centerV):
+        """Update the centers of the H and V masks and display masks on the LCOS.
+        """
+        if (self.mask_specs['H']['centers'] == centerH and 
+            self.mask_specs['V']['centers'] == centerV):
+            return
+
+        self.mask_specs['H']['centers'] = centerH
+        self.mask_specs['V']['centers'] = centerV
+
+        self._update_centers() #Update the centers and apertures
+        self._display_masks() #display masks without updating the masks
+        
+    def resetAttenuation(self):
+        for pol in ['H','V']:
+            self.mask_specs[pol]['att_enabled'] = 0
+            self.mask_specs[pol]['attWeight'] = 0
     
     #Takes new patterns in case you only want to update new patterns on top zernikes attenuation etc etc. Otherwise it will take self parameters and build the mask
-    def setmask(self, Hpattern = 0 , Vpattern = 0, pol= None ):
+    def setmask(self, Hpattern = 0 , Vpattern = 0, pol= None, update_centers = False ):
+        """Functio to call when you want to update the masks and display them on the LCOS
+
+        Args:
+            Hpattern (int): H pattern
+            Vpattern (int): V pattern
+            pol (str): 'H', 'V' or 'HV'
+        """
+
         t1 = time.time()
-        #t = mkl.times #use t.tic() t.toc() to measure time
+
         if Hpattern != 0:
            self.mask_specs['H']['pattern'] = Hpattern
         if Vpattern != 0:
             self.mask_specs['V']['pattern'] = Vpattern
         if pol != None:
             self.polEnabled = pol
-            
-        #print('Adding mask')
-        #t.tic()
-        self.addMasks() #Update the masks
-        #t.toc()
-        #print('Bulding LCOS mask')
-        #t.tic()
-        self.masksToLCOS(mask_h = self.Hmask , mask_v = self.Vmask, pol=self.polEnabled) #Using de added masks
-        #t.toc()
-        self.DisplayePhasedMask = self.LCOS_array
-        #print('Level mask')
-        #t.tic()
-        LEVELMASK = self.phaseTolevel(self.LCOS_array, self.apertureApplied)
-        #t.toc()
-        self.DisplayedLevelMask = LEVELMASK
-        #print('Displaying')
-        #t.tic()
-        self.LCOS_Display(LEVELMASK)
+
+        self._addMasks() #Gnerate the masks
+
+        if update_centers:
+            self._update_centers() #Generate the apertures and update masks location on the LCOS array
+
+        self._display_masks() #Display the masks on the LCOS
         etime = time.time() - t1
         self.refreshfreq = 1/etime
-        #t.toc()
     
+    def _display_masks(self):
+        """Display the masks on the LCOS.
+        """
+        self._masksToLCOS(mask_h = self.Hmask , mask_v = self.Vmask, pol=self.polEnabled) #Using de added masks
+        self.DisplayePhasedMask = self.LCOS_array
+        LEVELMASK = self.phaseTolevel(self.LCOS_array, self.apertureApplied)
+        self.DisplayedLevelMask = LEVELMASK
+        self.LCOS_Display(LEVELMASK) #Display using the internal set channel
+
+
     #I got tired.. so I am passing for now
     def save(self): #Save settings. 
         pass
@@ -253,6 +331,13 @@ class LCOS(fullscreenqt.FullscreenWindow):
         att_linear = 10**(-att/10) #this is in linear
         att_phase = 2 * np.arccos(np.sqrt(att_linear)) # phase, from 0 to pi
         return(att_phase)    
+
+    @staticmethod
+    def getAngle(cmplxarray):
+        im = cmplxarray.imag
+        re = cmplxarray.real
+        cc = ne.evaluate('arctan2(im,re)')
+        return(cc)
         
     @staticmethod
     def binarycheckboard(width, height, spatial_frequency, scale=1, offset = False ,pol = 'HV'):
@@ -290,7 +375,7 @@ class LCOS(fullscreenqt.FullscreenWindow):
     
     #This is slow, no thought to recalculate apertures all the time
     @staticmethod
-    def aperture(diameter,center, LCOS_size, px_size):
+    def aperture(diameter, center, LCOS_size, px_size):
         pxY = LCOS_size[0]
         pxX = LCOS_size[1]
         x = np.arange(pxX) - center[0] 
@@ -302,12 +387,37 @@ class LCOS(fullscreenqt.FullscreenWindow):
     
         m[r<=(radius_px)] = 1
         return(m)
-         
+
+
+class Aperture:
+    def __init__(self, diameter, LCOS_size, px_size):
+        self.h, self.w = LCOS_size
+        self.R = int(np.floor(diameter / (2 * px_size)))
+        self.R2 = self.R * self.R
+        self.x = np.arange(self.w, dtype=np.float32)
+        self.y = np.arange(self.h, dtype=np.float32)[:, None]
+        self.h_aperture = np.zeros((self.h, self.w), dtype=np.uint8)
+        self.v_aperture = np.zeros((self.h, self.w), dtype=np.uint8)
+        self.total_aperture = np.zeros((self.h, self.w), dtype=np.uint8)
+    def _fill_disk(self, out, cx, cy):
+        out.fill(0)
+        cx, cy = int(cx), int(cy)
+        ys = slice(max(0, cy - self.R), min(self.h, cy + self.R + 1))
+        xs = slice(max(0, cx - self.R), min(self.w, cx + self.R + 1))
+        yy = self.y[ys]
+        xx = self.x[xs]
+        out[ys, xs] = ((xx - cx) ** 2 + (yy - cy) ** 2) <= self.R2
+    def calculate_apertures(self, H_center, V_center):
+        self._fill_disk(self.h_aperture, *H_center)
+        self._fill_disk(self.v_aperture, *V_center)
+        np.logical_or(self.h_aperture, self.v_aperture, out=self.total_aperture)
+        return self.h_aperture, self.v_aperture, self.total_aperture
+
 
 if __name__ == '__main__':
     
     import sys
-    from PyQt5.QtWidgets import *
+    from PySide6.QtWidgets import *
     
     from pylab import *
     
