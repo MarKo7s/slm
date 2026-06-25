@@ -17,6 +17,7 @@ import numpy as np
 
 DEFAULT_SDK_PATH = Path(r"C:\Program Files\Meadowlark Optics\Blink 1920 HDMI\SDK")
 DEFAULT_PIXEL_PITCH_UM = 9.2  # not exposed by HDMI SDK; set from datasheet / calibration
+CHANNEL_INDICATOR_LEVEL = 100  # graylevel on the active HDMI plane (R/G/B)
 
 
 class MeadowlarkSDKError(RuntimeError):
@@ -101,6 +102,7 @@ class MeadowlarkSDK:
         self.pixel_pitch_um = float(pixel_pitch_um)
         self._lib: Optional[ctypes.CDLL] = None
         self._initialized = False
+        self._display_written = False
         self._rgba_buffer: Optional[np.ndarray] = None
 
         self._load_library()
@@ -135,6 +137,9 @@ class MeadowlarkSDK:
 
         lib.Set_channel.argtypes = [ctypes.c_int]
         lib.Set_channel.restype = ctypes.c_int
+
+        lib.Set_SLMVCom.argtypes = [ctypes.c_float]
+        lib.Set_SLMVCom.restype = ctypes.c_int
 
         lib.Write_image.argtypes = [ctypes.POINTER(ctypes.c_ubyte), ctypes.c_uint]
         lib.Write_image.restype = None
@@ -197,6 +202,7 @@ class MeadowlarkSDK:
             return
         self._lib.Delete_SDK()
         self._initialized = False
+        self._display_written = False
         self._rgba_buffer = None
 
     def __enter__(self) -> "MeadowlarkSDK":
@@ -272,6 +278,27 @@ class MeadowlarkSDK:
         """Coverglass voltage in volts."""
         return float(self._require_open().Get_SLMVCom())
 
+    def set_coverglass_voltage(self, volts: float) -> None:
+        """Set coverglass voltage in volts (1920x1152 HDMI model). Use with care."""
+        ok = self._require_open().Set_SLMVCom(ctypes.c_float(float(volts)))
+        if not ok:
+            raise MeadowlarkSDKError(f"Set_SLMVCom({volts}) failed")
+
+    @staticmethod
+    def parse_lut_file(lut_path: os.PathLike) -> Tuple[np.ndarray, np.ndarray]:
+        """Read a Meadowlark LUT file (input graylevel, drive level per line)."""
+        inputs: list[int] = []
+        outputs: list[float] = []
+        with open(lut_path, encoding="utf-8") as handle:
+            for line in handle:
+                parts = line.split()
+                if len(parts) >= 2:
+                    inputs.append(int(parts[0]))
+                    outputs.append(float(parts[1]))
+        if not inputs:
+            raise ValueError(f"No LUT data in {lut_path}")
+        return np.asarray(inputs, dtype=np.int32), np.asarray(outputs, dtype=np.float64)
+
     # --- configuration ---
 
     def load_lut(self, lut_path: os.PathLike) -> None:
@@ -296,6 +323,41 @@ class MeadowlarkSDK:
         ok = self._require_open().Set_channel(channel)
         if not ok:
             raise MeadowlarkSDKError(f"Set_channel({channel}) failed")
+
+    def fill_channel_indicator(
+        self,
+        channel: int,
+        level: int = CHANNEL_INDICATOR_LEVEL,
+    ) -> None:
+        """
+        Clear the RGB buffer and tint the active HDMI input plane (R/G/B).
+
+        Useful after :meth:`open` or when switching channels so the SLM shows
+        which color plane the controller is reading.
+        """
+        if channel not in (0, 1, 2):
+            raise ValueError("channel must be 0 (red), 1 (green), or 2 (blue)")
+        rgb = self.rgb_buffer
+        rgb[:] = 0
+        rgb[:, :, channel] = int(np.clip(level, 0, 255))
+
+    def init_display(self) -> None:
+        """Push a zero frame to the SLM (required before some SDK calls such as Set_channel)."""
+        self.rgb_buffer[:] = 0
+        self.write_image()
+        self._display_written = True
+
+    def write_channel_indicator(
+        self,
+        channel: int,
+        level: int = CHANNEL_INDICATOR_LEVEL,
+    ) -> None:
+        """Select HDMI channel, fill the plane indicator, and push to the SLM."""
+        if not self._display_written:
+            self.init_display()
+        self.set_channel(channel)
+        self.fill_channel_indicator(channel, level=level)
+        self.write_image()
 
     def _copy_into_buffer(self, image: np.ndarray) -> None:
         """Copy *image* into the persistent RGBA buffer (no allocation)."""
@@ -378,6 +440,7 @@ class MeadowlarkSDK:
         except (AttributeError, OSError):
             pass
         _pump_win32_messages()
+        self._display_written = True
 
     def info(self) -> dict:
         """Summary dict of SLM geometry, connection status, and monitoring reads."""

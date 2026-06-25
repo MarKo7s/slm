@@ -230,13 +230,14 @@ class PhasePreviewPyqtgraph(pg.ImageView):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        QTimer.singleShot(0, self._fit_view)
+        QTimer.singleShot(0, self.fit_to_window)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        QTimer.singleShot(0, self._fit_view)
+        QTimer.singleShot(0, self.fit_to_window)
 
-    def _fit_view(self) -> None:
+    def fit_to_window(self) -> None:
+        """Fit full LCOS frame to the view; max range prevents zooming out past fit."""
         self.view.setLimits(
             xMin=0,
             xMax=self.lcos_width,
@@ -297,7 +298,7 @@ class PhasePreviewPyqtgraph(pg.ImageView):
         )
         if not self._did_initial_fit:
             self._did_initial_fit = True
-            QTimer.singleShot(0, self._fit_view)
+            QTimer.singleShot(0, self.fit_to_window)
 
 
 _BACKENDS = {

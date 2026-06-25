@@ -22,6 +22,16 @@ def apply_channel_colormap(image_item, channel: int) -> None:
     image_item.setLookupTable(channel_colormap_lut(channel))
 
 
+def level_to_phase(level: float) -> float:
+    """Invert LCOS.phaseTolevel: uint8 0…255 → radians −π…π."""
+    return (float(level) / 255.0) * (2.0 * PI) - PI
+
+
+def phase_to_level(phase: float) -> float:
+    """Forward map radians −π…π → drive level 0…255 (before uint8 rounding)."""
+    return 255.0 * (float(phase) + PI) / (2.0 * PI)
+
+
 def phase_to_rgb(phase: np.ndarray, channel: int) -> np.ndarray:
     """Map phase (-pi..pi) to an RGB888 image tinted to the SLM channel."""
     level = np.clip((phase + PI) / (2.0 * PI), 0.0, 1.0)
