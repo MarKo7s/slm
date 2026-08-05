@@ -1,24 +1,11 @@
 import numpy as np
 import numexpr as ne
 import time
-#ne.set_num_threads(16) # I am not useing large set of arrays so 8 seems the best
 
-import sys
-#sys.path.append("C:\LAB\Coding\Python\MODULES")
-#import mark_lib as mkl
-
-import pathlib
-#I think this is not needed anymore since we are using the repo root
-p = pathlib.Path(__file__).parent.parent
-path_to_module = p
-#print(path_to_module)
-sys.path.append(str(path_to_module))
-
-#If I do not do from folder.fullscreenqt import module, super(). will fail when LCOS called from other module -- I do not know what the F*** is happeing
-from hdmi.fullscreenqt import FullscreenWindow
-from utilities.read_specs import load_slm_specs
-from utilities.displays import find_display, display_discovery
-from maksSpecs import ModMuxMask
+from .hdmi.fullscreenqt import FullscreenWindow
+from .utilities.read_specs import load_slm_specs
+from .utilities.displays import find_display, display_discovery
+from .maksSpecs import ModMuxMask
 
 class LCOS(FullscreenWindow):
     def __init__(self, screen = 1, channel = 0, pixel_size = 9.2e-6, aperture_diameter = 7.5e-3, mask_size = (960,960), MODELAB_COMPATIBILITY = True,  **kwargs):

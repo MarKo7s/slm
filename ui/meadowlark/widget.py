@@ -16,9 +16,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from meadowlark import MeadowlarkSDK, MeadowlarkSDKError
-from ui.meadowlark.lut_plot import LutPlot
-from ui.meadowlark.settings import LUT_DIR, load_settings, save_settings
+from slm.meadowlark import MeadowlarkSDK, MeadowlarkSDKError
+from .lut_plot import LutPlot
+from .settings import LUT_DIR, load_settings, save_settings
 
 _CHANNEL_NAMES = ("Red", "Green", "Blue")
 _INVALID_READ = -1.0

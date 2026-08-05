@@ -4,21 +4,41 @@
 
 Mask state, centers, and apertures live in `ModMuxMask` (`maksSpecs.py`). The `LCOS` class handles display, composition, and the update pipeline.
 
+Python package name: **`slm`** (GitHub: [MarKo7s/slm](https://github.com/MarKo7s/slm)).
+
 ---
 
-## Requirements
+## Installation
 
-- Python 3.11 recommended
-- Dependencies: see `requirements.txt` (`PySide6`, `numpy`, `numexpr`, …)
-- A connected SLM configured as an extended display (or use screen auto-detection by name)
+### From GitHub (tagged release)
+
+```bash
+pip install "slm[notebooks] @ git+https://github.com/MarKo7s/slm.git@v0.1.0"
+```
+
+Core only (no Jupyter / pyqtgraph extras):
+
+```bash
+pip install "slm @ git+https://github.com/MarKo7s/slm.git@v0.1.0"
+```
+
+### Local development (editable install)
+
+```bash
+git clone git@github.com:MarKo7s/slm.git
+cd slm
+pip install -e ".[notebooks]"
+```
+
+### Conda environment
 
 ```bash
 conda create -n slm python=3.11 -y
 conda activate slm
-pip install -r requirements.txt
+pip install -e ".[notebooks]"
 ```
 
-The driver adds the parent `LAB` folder to `sys.path` so it can import `hdmi`, `utilities`, etc.
+`requirements.txt` remains available for legacy workflows; prefer `pip install -e ".[notebooks]"`.
 
 ---
 
@@ -29,7 +49,7 @@ The driver adds the parent `LAB` folder to `sys.path` so it can import `hdmi`, `
 ```python
 import sys
 from PySide6.QtWidgets import QApplication
-from pyLCOS import LCOS
+from slm import LCOS
 
 app = QApplication(sys.argv)
 
@@ -38,6 +58,14 @@ slm = LCOS(screen=1, mask_size=(960, 960))
 # ... change patterns, call slm.setmask(), etc.
 
 app.exec()
+```
+
+Or import the driver module explicitly:
+
+```python
+from slm.pyLCOS import LCOS
+from slm.ui.simpleholography.pistoning import PistoningWidget
+from slm.ui.ModMux import ModMuxWidget
 ```
 
 ### Screen selection
@@ -449,3 +477,51 @@ finally:
 - `save()`, `restore()`, and `load()` on `LCOS` are not implemented yet.
 - `setmask()` must be called after `resetAttenuation()` or direct `ModMuxMask` content edits to refresh the SLM.
 - For low-level full-frame control without MODMUX, use `LCOS_Display` + `phaseTolevel` directly.
+
+---
+
+## Versioning
+
+The package version is defined in **one place only**: `pyproject.toml` → `[project].version`.
+
+Do **not** edit `__init__.py` on each release. `slm.__version__` is read from pip metadata after install (`importlib.metadata`).
+
+```bash
+pip show slm
+python -c "import slm; print(slm.__version__)"
+```
+
+Use [semantic versioning](https://semver.org/): `MAJOR.MINOR.PATCH`.
+
+## Releasing a new version
+
+1. Add an entry for the new version at the top of `CHANGELOG.md`.
+2. Bump `version` in `pyproject.toml`.
+3. Commit all changes (including the changelog).
+4. Run the release script from the repo root:
+
+```bash
+python scripts/release.py --from-changelog
+```
+
+The script reads the version from `pyproject.toml`, pushes `main`, creates annotated git tag `vX.Y.Z`, and pushes the tag. With `--from-changelog`, the tag message is taken from the matching `CHANGELOG.md` section.
+
+Install a released tag:
+
+```bash
+pip install "slm[notebooks] @ git+https://github.com/MarKo7s/slm.git@vX.Y.Z"
+```
+
+Dry run:
+
+```bash
+python scripts/release.py --from-changelog --dry-run
+```
+
+Optional GitHub Release:
+
+```bash
+gh release create vX.Y.Z --title "slm X.Y.Z" --notes-file CHANGELOG.md
+```
+
+**Requirements before release:** clean working tree; tag `vX.Y.Z` must not already exist on GitHub.

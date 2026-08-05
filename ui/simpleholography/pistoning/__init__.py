@@ -1,3 +1,3 @@
-from ui.simpleholography.pistoning.widget import PistoningWidget
+from .widget import PistoningWidget
 
 __all__ = ["PistoningWidget"]

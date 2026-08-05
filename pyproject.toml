@@ -1,0 +1,50 @@
+[project]
+name = "slm"
+version = "0.1.0"
+description = "MODMUX dual-polarization LCOS SLM driver, Meadowlark SDK helpers, and Qt control widgets"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "PySide6>=6.11,<6.12",
+  "numpy>=2.0,<2.6",
+  "numexpr>=2.8",
+]
+
+[project.optional-dependencies]
+notebooks = [
+  "matplotlib>=3.10",
+  "jupyter>=1.0",
+  "ipython>=8.0",
+  "ipykernel>=6.0",
+  "ipywidgets>=8.0",
+  "pyqtgraph>=0.13",
+  "h5py>=3.10",
+  "hdf5storage>=0.2",
+]
+
+[project.urls]
+Repository = "https://github.com/MarKo7s/slm"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"slm" = "."}
+packages = [
+  "slm",
+  "slm.hdmi",
+  "slm.meadowlark",
+  "slm.utilities",
+  "slm.ui",
+  "slm.ui.ModMux",
+  "slm.ui.meadowlark",
+  "slm.ui.simpleholography",
+  "slm.ui.simpleholography.pistoning",
+]
+
+[tool.setuptools.package-data]
+slm = [
+  "config/*.json",
+  "config/LUT Files/meadowlark/*",
+]

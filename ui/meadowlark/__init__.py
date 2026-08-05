@@ -1,3 +1,3 @@
-from ui.meadowlark.widget import MeadowlarkWidget
+from .widget import MeadowlarkWidget
 
 __all__ = ["MeadowlarkWidget"]

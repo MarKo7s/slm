@@ -3,11 +3,11 @@
 import numpy as np
 from PySide6.QtWidgets import QGroupBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
-from ui.ModMux.centers_panel import display_center_to_user
-from ui.ModMux.channel_panel import ChannelPanel
-from ui.ModMux.extra_functionalities import create_extra_widgets
-from ui.ModMux.pol_mask_panel import PolMaskPanel
-from ui.ModMux.preview import LcosPreview
+from .centers_panel import display_center_to_user
+from .channel_panel import ChannelPanel
+from .extra_functionalities import create_extra_widgets
+from .pol_mask_panel import PolMaskPanel
+from .preview import LcosPreview
 
 
 def pol_from_masters(h_on: bool, v_on: bool) -> str | None:

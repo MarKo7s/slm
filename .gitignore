@@ -9,6 +9,11 @@ __pycache__/
 *.so
 .Python
 
+# Packaging / build
+build/
+dist/
+*.egg-info/
+.eggs/
 
 # Virtual environments
 .venv/

@@ -1,7 +1,7 @@
 import math
 
 import numpy as np
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
@@ -12,8 +12,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ui.simpleholography.pistoning.phase_preview import PhasePreview
-from utilities.simpleHolography import (
+from .colormaps import (
+    level_to_phase,
+    levels_to_phase,
+    phase_to_level,
+)
+from .phase_preview import PhasePreview
+from slm.utilities.simpleHolography import (
     REGION_ALL,
     REGION_BL,
     REGION_BOTTOM,
@@ -30,6 +35,9 @@ from utilities.simpleHolography import (
 PI = math.pi
 PISTON_INTERVAL_MS = 250
 PISTON_STEP = 0.2
+PISTON_STEP_LEVEL = 5
+LEVEL_MIN = 0
+LEVEL_MAX = 255
 
 _REGION_LABELS = {
     REGION_ALL: "All",
@@ -119,16 +127,45 @@ class _RegionControl:
 
 
 class PistoningWidget(QWidget):
-    """Interactive pistoning control with draggable LCOS quadrant cuts."""
+    """Interactive pistoning control with draggable LCOS quadrant cuts.
 
-    def __init__(self, slm, parent=None):
+    Pass an ``slm`` to also push the mask to hardware. Omit ``slm`` and pass
+    ``size=(height, width)`` for mask generation / preview only (e.g. embedding
+    in ModMux or another host).
+
+    Hosts should connect to :attr:`phaseMaskChanged` after construction::
+
+        pistoning = PistoningWidget(size=slm.LCOSsize)
+        pistoning.phaseMaskChanged.connect(on_phase_mask)
+
+        def on_phase_mask(phase: np.ndarray) -> None:
+            # float radians, shape (H, W)
+            ...
+    """
+
+    # Emitted after every mask rebuild (with or without SLM). Payload is the
+    # float phase ndarray in radians, shape (H, W). Connect from a host widget:
+    #   pistoning.phaseMaskChanged.connect(host.on_phase_mask)
+    phaseMaskChanged = Signal(object)
+
+    def __init__(self, slm=None, parent=None, *, size=None, channel=None):
         super().__init__(parent)
         self.slm = slm
-        self.height, self.width = slm.LCOSsize
+        if slm is not None:
+            self.height, self.width = slm.LCOSsize
+            self.ch = int(slm.ch if channel is None else channel)
+        else:
+            if size is None:
+                raise ValueError("PistoningWidget requires size=(height, width) when slm is None")
+            self.height, self.width = int(size[0]), int(size[1])
+            self.ch = 0 if channel is None else int(channel)
+
         self.cut_x = self.width // 2
         self.cut_y = self.height // 2
         self.enable_v_cut = True
         self.enable_h_cut = True
+        self.level_mode = False
+        self.phase_mask: np.ndarray | None = None
         self._phases: dict[str, float] = {k: 0.0 for k in region_keys(True, True)}
         self._region_controls: dict[str, _RegionControl] = {}
 
@@ -157,12 +194,16 @@ class PistoningWidget(QWidget):
         cut_row.addStretch(1)
         left.addLayout(cut_row)
 
+        self.level_mode_cb = QCheckBox("Level mode")
+        self.level_mode_cb.setChecked(False)
+        left.addWidget(self.level_mode_cb)
+
         self._controls_box = QGroupBox("Phase")
         self._controls_layout = QVBoxLayout(self._controls_box)
         left.addWidget(self._controls_box)
         left.addStretch(1)
 
-        self._preview = PhasePreview(self.width, self.height, self.slm.ch)
+        self._preview = PhasePreview(self.width, self.height, self.ch)
         self._preview.cut_x = self.cut_x
         self._preview.cut_y = self.cut_y
         self._preview.cutsChanged.connect(self._on_cuts_moved)
@@ -177,12 +218,26 @@ class PistoningWidget(QWidget):
 
         self.v_cut_cb.toggled.connect(self._on_cut_toggled)
         self.h_cut_cb.toggled.connect(self._on_cut_toggled)
+        self.level_mode_cb.toggled.connect(self._on_level_mode_toggled)
+
+    def _apply_spin_mode(self, control: _RegionControl) -> None:
+        spin = control.spin
+        spin.blockSignals(True)
+        if self.level_mode:
+            spin.setRange(LEVEL_MIN, LEVEL_MAX)
+            spin.setDecimals(0)
+            spin.setSingleStep(1)
+        else:
+            spin.setRange(-PI, PI)
+            spin.setDecimals(2)
+            spin.setSingleStep(0.01)
+        spin.blockSignals(False)
 
     def _rebuild_region_controls(self) -> None:
         old_keys = list(self._region_controls.keys())
-        old_phases = self._current_phases()
+        old_values = self._current_values()
         new_keys = region_keys(self.enable_v_cut, self.enable_h_cut)
-        self._phases = _migrate_phases(old_keys, new_keys, old_phases)
+        self._phases = _migrate_phases(old_keys, new_keys, old_values)
 
         while self._controls_layout.count():
             item = self._controls_layout.takeAt(0)
@@ -193,6 +248,7 @@ class PistoningWidget(QWidget):
         self._region_controls.clear()
         for key in new_keys:
             control = _RegionControl(key)
+            self._apply_spin_mode(control)
             control.spin.setValue(self._phases[key])
             control.spin.valueChanged.connect(self._update_display)
             control.auto.toggled.connect(self._on_auto_toggled)
@@ -201,7 +257,7 @@ class PistoningWidget(QWidget):
 
         self._sync_cut_lines()
 
-    def _current_phases(self) -> dict[str, float]:
+    def _current_values(self) -> dict[str, float]:
         if self._region_controls:
             return {key: ctrl.spin.value() for key, ctrl in self._region_controls.items()}
         return dict(self._phases)
@@ -213,6 +269,25 @@ class PistoningWidget(QWidget):
         self.enable_v_cut = self.v_cut_cb.isChecked()
         self.enable_h_cut = self.h_cut_cb.isChecked()
         self._rebuild_region_controls()
+        self._update_display()
+
+    def _on_level_mode_toggled(self, enabled: bool) -> None:
+        values = self._current_values()
+        if enabled:
+            converted = {k: round(phase_to_level(v)) for k, v in values.items()}
+            self._controls_box.setTitle("Level")
+        else:
+            converted = {k: level_to_phase(v) for k, v in values.items()}
+            self._controls_box.setTitle("Phase")
+
+        self.level_mode = enabled
+        self._phases = converted
+        for key, control in self._region_controls.items():
+            self._apply_spin_mode(control)
+            control.spin.blockSignals(True)
+            control.spin.setValue(converted.get(key, 0.0))
+            control.spin.blockSignals(False)
+            control.direction = 1
         self._update_display()
 
     def _on_cuts_moved(self) -> None:
@@ -228,15 +303,22 @@ class PistoningWidget(QWidget):
         self._update_display()
 
     def _piston_tick(self) -> None:
+        if self.level_mode:
+            step = PISTON_STEP_LEVEL
+            lo, hi = LEVEL_MIN, LEVEL_MAX
+        else:
+            step = PISTON_STEP
+            lo, hi = -PI, PI
+
         for control in self._region_controls.values():
             if not control.auto.isChecked():
                 continue
-            value = control.spin.value() + control.direction * PISTON_STEP
-            if value >= PI:
-                value = PI
+            value = control.spin.value() + control.direction * step
+            if value >= hi:
+                value = hi
                 control.direction = -1
-            elif value <= -PI:
-                value = -PI
+            elif value <= lo:
+                value = lo
                 control.direction = 1
             control.spin.blockSignals(True)
             control.spin.setValue(value)
@@ -244,18 +326,29 @@ class PistoningWidget(QWidget):
         self._update_display()
 
     def _update_display(self) -> None:
-        phases = self._current_phases()
-        phase = pistoning_phase_mask(
+        values = self._current_values()
+        mask = pistoning_phase_mask(
             (self.height, self.width),
             self.cut_x,
             self.cut_y,
             self.enable_v_cut,
             self.enable_h_cut,
-            phases,
+            values,
         )
-        self._preview.set_phase(phase)
-        level = self.slm.phaseTolevel(phase)
-        self.slm.LCOS_Display(level, ch=self.slm.ch)
+
+        if self.level_mode:
+            level = np.clip(mask, LEVEL_MIN, LEVEL_MAX).astype(np.uint8)
+            self.phase_mask = levels_to_phase(level)
+            self._preview.set_level(level)
+            self.phaseMaskChanged.emit(self.phase_mask)
+            if self.slm is not None:
+                self.slm.LCOS_Display(level, ch=self.ch)
+        else:
+            self.phase_mask = mask
+            self._preview.set_phase(mask)
+            self.phaseMaskChanged.emit(mask)
+            if self.slm is not None:
+                self.slm.LCOS_Display(self.slm.phaseTolevel(mask), ch=self.ch)
 
     def closeEvent(self, event) -> None:
         self._piston_timer.stop()

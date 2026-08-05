@@ -6,7 +6,7 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QTimer, Signal
 
-from ui.simpleholography.pistoning.colormaps import apply_channel_colormap, level_to_phase
+from slm.ui.simpleholography.pistoning.colormaps import apply_channel_colormap, level_to_phase
 
 PI = math.pi
 

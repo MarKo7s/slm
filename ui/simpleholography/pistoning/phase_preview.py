@@ -8,7 +8,7 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap, QWheelEvent
 from PySide6.QtWidgets import QGraphicsLineItem, QGraphicsPixmapItem, QGraphicsScene, QGraphicsView
 
-from ui.simpleholography.pistoning.colormaps import apply_channel_colormap, phase_to_rgb
+from .colormaps import apply_channel_colormap, level_to_rgb, phase_to_rgb
 
 PI = math.pi
 HIT_TOLERANCE_PX = 8
@@ -116,6 +116,12 @@ class PhasePreviewQt(QGraphicsView):
 
     def set_phase(self, phase: np.ndarray) -> None:
         rgb = phase_to_rgb(phase, self.channel)
+        h, w, _ = rgb.shape
+        image = QImage(rgb.data, w, h, 3 * w, QImage.Format.Format_RGB888)
+        self._pixmap_item.setPixmap(QPixmap.fromImage(image.copy()))
+
+    def set_level(self, level: np.ndarray) -> None:
+        rgb = level_to_rgb(level, self.channel)
         h, w, _ = rgb.shape
         image = QImage(rgb.data, w, h, 3 * w, QImage.Format.Format_RGB888)
         self._pixmap_item.setPixmap(QPixmap.fromImage(image.copy()))
@@ -294,6 +300,18 @@ class PhasePreviewPyqtgraph(pg.ImageView):
             autoRange=False,
             autoLevels=False,
             levels=(-PI, PI),
+            autoHistogramRange=False,
+        )
+        if not self._did_initial_fit:
+            self._did_initial_fit = True
+            QTimer.singleShot(0, self.fit_to_window)
+
+    def set_level(self, level: np.ndarray) -> None:
+        self.setImage(
+            level.astype(np.float64),
+            autoRange=False,
+            autoLevels=False,
+            levels=(0, 255),
             autoHistogramRange=False,
         )
         if not self._did_initial_fit:

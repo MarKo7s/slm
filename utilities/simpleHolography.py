@@ -36,7 +36,7 @@ def pistoning_phase_mask(
     enable_h_cut: bool,
     phases: dict[str, float],
 ) -> np.ndarray:
-    """Build a uniform-phase mask split by optional vertical/horizontal cuts.
+    """Build a uniform-value mask split by optional vertical/horizontal cuts.
 
     Args:
         shape: (height, width) LCOS array shape.
@@ -44,10 +44,11 @@ def pistoning_phase_mask(
         cut_y: Horizontal divider row index.
         enable_v_cut: Split left/right at cut_x.
         enable_h_cut: Split top/bottom at cut_y.
-        phases: Mapping from region key (see region_keys) to phase in radians.
+        phases: Mapping from region key (see region_keys) to uniform value
+            (phase in radians, or drive level 0…255).
 
     Returns:
-        float64 phase array with shape ``shape``.
+        float64 array with shape ``shape``.
     """
     height, width = shape
     cut_x = _clamp_cut(cut_x, width)

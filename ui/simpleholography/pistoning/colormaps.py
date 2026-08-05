@@ -32,12 +32,23 @@ def phase_to_level(phase: float) -> float:
     return 255.0 * (float(phase) + PI) / (2.0 * PI)
 
 
-def phase_to_rgb(phase: np.ndarray, channel: int) -> np.ndarray:
-    """Map phase (-pi..pi) to an RGB888 image tinted to the SLM channel."""
-    level = np.clip((phase + PI) / (2.0 * PI), 0.0, 1.0)
-    gray = (level * 255.0).astype(np.uint8)
+def levels_to_phase(level: np.ndarray) -> np.ndarray:
+    """Array form of level_to_phase: uint8/float 0…255 → radians −π…π."""
+    return (level.astype(np.float64) / 255.0) * (2.0 * PI) - PI
+
+
+def level_to_rgb(level: np.ndarray, channel: int) -> np.ndarray:
+    """Map drive levels (0…255) to an RGB888 image tinted to the SLM channel."""
+    gray = np.clip(level, 0, 255).astype(np.uint8)
     h, w = gray.shape
     rgb = np.zeros((h, w, 3), dtype=np.uint8)
     ch = int(channel) if channel in (0, 1, 2) else 0
     rgb[:, :, ch] = gray
     return np.ascontiguousarray(rgb)
+
+
+def phase_to_rgb(phase: np.ndarray, channel: int) -> np.ndarray:
+    """Map phase (-pi..pi) to an RGB888 image tinted to the SLM channel."""
+    level = np.clip((phase + PI) / (2.0 * PI), 0.0, 1.0)
+    gray = (level * 255.0).astype(np.uint8)
+    return level_to_rgb(gray, channel)

@@ -1,3 +1,3 @@
-from hdmi.fullscreenqt import FullscreenWindow
+from .fullscreenqt import FullscreenWindow
 
 __all__ = ["FullscreenWindow"]
