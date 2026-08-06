@@ -32,8 +32,10 @@ pip install -e ".[notebooks]"
 
 ### Conda environment
 
+Conda provides **Python + pip only**. Install `slm` (and any numpy/matplotlib) with **pip** so conda Qt DLLs do not conflict with PySide6 on Windows.
+
 ```bash
-conda create -n slm python=3.11 -y
+conda create -n slm python=3.11 pip -y
 conda activate slm
 pip install -e ".[notebooks]"
 ```
