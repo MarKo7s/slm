@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtWidgets import QPushButton, QWidget
 
 if TYPE_CHECKING:
-    from ui.ModMux.widget import ModMuxWidget
+    from slm.ui.ModMux.widget import ModMuxWidget
 
 #! ADD HERE THE WIDGETS
 #! If meadowlark is the alias, this button will open the Meadowlark SDK panel; SDK channel changes sync into ModMux.
@@ -25,7 +25,7 @@ class MeadowlarkDriverButton(QPushButton):
         return self._gui
 
     def _open(self) -> None:
-        from ui.meadowlark import MeadowlarkWidget
+        from slm.ui.meadowlark import MeadowlarkWidget
 
         if self._gui is None:
             self._gui = MeadowlarkWidget(self._modmux.slm)

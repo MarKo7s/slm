@@ -135,6 +135,15 @@ class MeadowlarkSDK:
         lib.Load_lut.argtypes = [ctypes.c_char_p]
         lib.Load_lut.restype = ctypes.c_int
 
+        lib.Store_lut.argtypes = []
+        lib.Store_lut.restype = ctypes.c_int
+
+        lib.SetPreRampSlope.argtypes = [ctypes.c_uint]
+        lib.SetPreRampSlope.restype = ctypes.c_int
+
+        lib.SetPostRampSlope.argtypes = [ctypes.c_uint]
+        lib.SetPostRampSlope.restype = ctypes.c_int
+
         lib.Set_channel.argtypes = [ctypes.c_int]
         lib.Set_channel.restype = ctypes.c_int
 
@@ -284,6 +293,34 @@ class MeadowlarkSDK:
         if not ok:
             raise MeadowlarkSDKError(f"Set_SLMVCom({volts}) failed")
 
+    def set_pre_ramp_slope(self, value: int) -> None:
+        """
+        Set pre-ramp slope for the DC-balanced pixel drive waveform.
+
+        Undocumented Meadowlark timing integer (defaults are typically ~7).
+        No hardware readback is available.
+        """
+        value = int(value)
+        if value < 0:
+            raise ValueError("pre_ramp_slope must be non-negative")
+        ok = self._require_open().SetPreRampSlope(ctypes.c_uint(value))
+        if not ok:
+            raise MeadowlarkSDKError(f"SetPreRampSlope({value}) failed")
+
+    def set_post_ramp_slope(self, value: int) -> None:
+        """
+        Set post-ramp slope for the DC-balanced pixel drive waveform.
+
+        Undocumented Meadowlark timing integer (defaults are typically ~24).
+        No hardware readback is available.
+        """
+        value = int(value)
+        if value < 0:
+            raise ValueError("post_ramp_slope must be non-negative")
+        ok = self._require_open().SetPostRampSlope(ctypes.c_uint(value))
+        if not ok:
+            raise MeadowlarkSDKError(f"SetPostRampSlope({value}) failed")
+
     @staticmethod
     def parse_lut_file(lut_path: os.PathLike) -> Tuple[np.ndarray, np.ndarray]:
         """Read a Meadowlark LUT file (input graylevel, drive level per line)."""
@@ -313,6 +350,16 @@ class MeadowlarkSDK:
         ok = self._require_open().Load_lut(str(path).encode("utf-8"))
         if not ok:
             raise MeadowlarkSDKError(f"Load_lut failed for {path}")
+
+    def store_lut(self) -> None:
+        """
+        Persist the currently loaded working LUT into controller non-volatile flash.
+
+        Distinct from :meth:`load_lut`, which only applies a file for the session.
+        """
+        ok = self._require_open().Store_lut()
+        if not ok:
+            raise MeadowlarkSDKError("Store_lut failed")
 
     def set_channel(self, channel: int) -> None:
         """

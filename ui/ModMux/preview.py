@@ -25,9 +25,15 @@ class LcosPreview(pg.ImageView):
         self.channel = channel
         self._level_image: np.ndarray | None = None
 
+        # Collapse ImageView chrome: hidden histogram/buttons still leave a
+        # vertical splitter + roiPlot strip that grows oddly on window resize.
         self.ui.roiBtn.hide()
         self.ui.menuBtn.hide()
         self.ui.histogram.hide()
+        self.ui.roiPlot.hide()
+        self.ui.roiPlot.setMinimumHeight(0)
+        self.ui.splitter.setHandleWidth(0)
+        self.ui.splitter.setSizes([1, 0])
 
         self.view.setAspectLocked(True)
         self.view.invertY(True)
@@ -47,22 +53,36 @@ class LcosPreview(pg.ImageView):
             maxYRange=self.lcos_height,
         )
 
+        self._fit_timer = QTimer(self)
+        self._fit_timer.setSingleShot(True)
+        self._fit_timer.setInterval(16)
+        self._fit_timer.timeout.connect(self.fit_to_window)
+
         self.scene.sigMouseMoved.connect(self._on_mouse_moved)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        QTimer.singleShot(0, self.fit_to_window)
+        self._schedule_fit()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        QTimer.singleShot(0, self.fit_to_window)
+        # Keep the ROI strip collapsed if ImageView re-applies splitter sizes.
+        self.ui.splitter.setSizes([1, 0])
+        self._schedule_fit()
 
     def leaveEvent(self, event) -> None:
         self.hoverChanged.emit("")
         super().leaveEvent(event)
 
+    def _schedule_fit(self) -> None:
+        self._fit_timer.start()
+
     def fit_to_window(self) -> None:
-        self.view.autoRange(padding=0)
+        self.view.setRange(
+            xRange=(0, self.lcos_width),
+            yRange=(0, self.lcos_height),
+            padding=0,
+        )
 
     def set_hdmi_image(self, image: np.ndarray) -> None:
         """Show the uint8 frame on the SLM monitor (screen_data channel)."""

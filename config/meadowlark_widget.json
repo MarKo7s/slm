@@ -1,4 +1,13 @@
 {
-  "coverglass_enabled": false,
-  "last_lut": "C:/Users/ModeLabQBI/LAB/hardware/SLM/config/LUT Files/meadowlark/1920x1152_linearVoltage.lut"
+  "coverglass_enabled": true,
+  "last_loaded_lut": "C:/Users/ModeLabQBI/LAB/experiments/calibrations/Meadowlark_LUT/data/LUTs/SLM_QBI_AR_843_5nm_cover_glass_6_2V_start_phase_0.1_quadrature_eps_0.017.lut",
+  "pre_ramp_slope": 20,
+  "post_ramp_slope": 24,
+  "coverglass_history_V": [
+    5.0,
+    7.0,
+    6.0,
+    6.2
+  ],
+  "coverglass_setpoint_V": 6.2
 }

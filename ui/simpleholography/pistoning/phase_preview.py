@@ -205,6 +205,10 @@ class PhasePreviewPyqtgraph(pg.ImageView):
         self.ui.roiBtn.hide()
         self.ui.menuBtn.hide()
         self.ui.histogram.hide()
+        self.ui.roiPlot.hide()
+        self.ui.roiPlot.setMinimumHeight(0)
+        self.ui.splitter.setHandleWidth(0)
+        self.ui.splitter.setSizes([1, 0])
 
         self.view.setAspectLocked(True)
         # pyqtgraph ImageItem y-axis is opposite the LCOS/monitor row order; flip view vertically.
@@ -234,13 +238,19 @@ class PhasePreviewPyqtgraph(pg.ImageView):
         self._h_line.sigPositionChanged.connect(self._on_h_line_moved)
         self._sync_cut_lines()
 
+        self._fit_timer = QTimer(self)
+        self._fit_timer.setSingleShot(True)
+        self._fit_timer.setInterval(16)
+        self._fit_timer.timeout.connect(self.fit_to_window)
+
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        QTimer.singleShot(0, self.fit_to_window)
+        self._fit_timer.start()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        QTimer.singleShot(0, self.fit_to_window)
+        self.ui.splitter.setSizes([1, 0])
+        self._fit_timer.start()
 
     def fit_to_window(self) -> None:
         """Fit full LCOS frame to the view; max range prevents zooming out past fit."""
@@ -254,7 +264,11 @@ class PhasePreviewPyqtgraph(pg.ImageView):
             maxXRange=self.lcos_width,
             maxYRange=self.lcos_height,
         )
-        self.view.autoRange(padding=0)
+        self.view.setRange(
+            xRange=(0, self.lcos_width),
+            yRange=(0, self.lcos_height),
+            padding=0,
+        )
 
     def update_cuts(self, cut_x: int, cut_y: int, enable_v: bool, enable_h: bool) -> None:
         self.cut_x, self.cut_y = _clamp_cuts(cut_x, cut_y, self.lcos_width, self.lcos_height)
