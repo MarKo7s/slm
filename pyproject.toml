@@ -1,6 +1,6 @@
 [project]
 name = "slm"
-version = "0.1.0"
+version = "0.2.0"
 description = "MODMUX dual-polarization LCOS SLM driver, Meadowlark SDK helpers, and Qt control widgets"
 readme = "README.md"
 requires-python = ">=3.11"

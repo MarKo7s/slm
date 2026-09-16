@@ -13,13 +13,13 @@ Python package name: **`slm`** (GitHub: [MarKo7s/slm](https://github.com/MarKo7s
 ### From GitHub (tagged release)
 
 ```bash
-pip install "slm[notebooks] @ git+https://github.com/MarKo7s/slm.git@v0.1.0"
+pip install "slm[notebooks] @ git+https://github.com/MarKo7s/slm.git@v0.2.0"
 ```
 
 Core only (no Jupyter / pyqtgraph extras):
 
 ```bash
-pip install "slm @ git+https://github.com/MarKo7s/slm.git@v0.1.0"
+pip install "slm @ git+https://github.com/MarKo7s/slm.git@v0.2.0"
 ```
 
 ### Local development (editable install)
