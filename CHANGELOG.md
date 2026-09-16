@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Meadowlark SDK/widget: store the session LUT into controller flash, last-loaded vs in-flash LUT status, and pre/post ramp-slope controls.
 - Example notebook cell for the standalone Meadowlark SDK panel.
 - Conda install guidance: Python + pip only, then install `slm` with pip so PySide6 is not mixed with conda Qt.
+- README screenshot of the ModMux control panel.
 
 ### Fixed
 

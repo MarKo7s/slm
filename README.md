@@ -457,6 +457,10 @@ finally:
 | `ui/ModMux/centers_panel.py` | User ↔ display center coordinate helpers |
 | `ui/ModMux/preview.py` | LCOS HDMI preview (pyqtgraph) |
 
+<!-- gui-screenshot -->
+![ModMux GUI](docs/images/gui.png)
+<!-- /gui-screenshot -->
+
 ---
 
 ## Related files

@@ -11,6 +11,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+gui = [
+  "pyqtgraph>=0.13",
+]
 notebooks = [
   "matplotlib>=3.10",
   "jupyter>=1.0",
