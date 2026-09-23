@@ -2,13 +2,13 @@
 
 import numpy as np
 from PySide6.QtWidgets import QGroupBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtCore import QTimer
 
 from .centers_panel import display_center_to_user
 from .channel_panel import ChannelPanel
 from .extra_functionalities import create_extra_widgets
 from .pol_mask_panel import PolMaskPanel
 from .preview import LcosPreview
-
 
 def pol_from_masters(h_on: bool, v_on: bool) -> str | None:
     if h_on and v_on:
@@ -23,6 +23,7 @@ def pol_from_masters(h_on: bool, v_on: bool) -> str | None:
 def masters_from_pol(pol: str) -> tuple[bool, bool]:
     return pol in ("H", "HV"), pol in ("V", "HV")
 
+UI_LOCKED_TEXT = "UI locked (Remote Control)"
 
 class ModMuxWidget(QWidget):
     """Controls ModMux enable flags, attenuation, and centers on an existing LCOS instance."""
@@ -38,15 +39,20 @@ class ModMuxWidget(QWidget):
 
         self._panel_h = PolMaskPanel("Mask H", self.width, self.height)
         self._panel_v = PolMaskPanel("Mask V", self.width, self.height)
-        self._channels = ChannelPanel(self.slm.ch)
-        self._user_controls = self._panel_h.user_controls() + self._panel_v.user_controls()
+        self._channels = ChannelPanel(self.slm.ch)  
         self._extra_functionality = create_extra_widgets(self.slm.alias, parent = self) #Pass self so we can connect signals
-
         self._preview = LcosPreview(self.width, self.height, self.slm.ch)
+
+        #! Build a list encapsulating all the user controls, so it is easy to enable and dissable them
+        self._user_controls = self._panel_h.user_controls() + self._panel_v.user_controls() + self._channels.user_controls() 
+        for extra in self._extra_functionality:
+            self._user_controls.extend(extra.user_controls())
 
         self._info_label = QLabel("")
         self._info_label.setWordWrap(True)
 
+        self._auto_preview_refresh_timer = QTimer(self)
+        self._auto_preview_refresh_timer.setInterval(100)
         self._build_ui()
         self._connect_signals()
         self.refresh_gui_state()
@@ -60,6 +66,7 @@ class ModMuxWidget(QWidget):
         controls.addWidget(self._panel_v)
         controls.addWidget(self._channels)
         controls.addStretch(1)
+
         for widget in self._extra_functionality:
             controls.addWidget(widget)
 
@@ -79,12 +86,21 @@ class ModMuxWidget(QWidget):
         root.addWidget(self._info_label)
 
     def _connect_signals(self) -> None:
-        for widget in self._user_controls:
+        #! Here connect controls to signals as you need. ie: panels do _on_user_change while channels do _sync_channel
+        for widget in self._panel_h.user_controls() + self._panel_v.user_controls():
             if hasattr(widget, "toggled"):
                 widget.toggled.connect(self._on_user_change)
             elif hasattr(widget, "valueChanged"):
                 widget.valueChanged.connect(self._on_user_change)
+
         self._channels.channelChanged.connect(self._sync_channel)
+        self._auto_preview_refresh_timer.timeout.connect(self._update_preview_async)
+    
+    def _start_auto_preview_refresh(self) -> None:
+        self._auto_preview_refresh_timer.start()
+
+    def _stop_auto_preview_refresh(self) -> None:
+        self._auto_preview_refresh_timer.stop()
 
     def _on_user_change(self, *_args) -> None:
         if self._ui_locked:
@@ -144,6 +160,7 @@ class ModMuxWidget(QWidget):
 
         self._update_preview()
 
+    #! In theory you use the object slm externaly and call refresh gui state instead of this function which call setmask
     def _apply_and_display(self) -> None:
         """Push control state to ModMuxMask, update SLM, refresh preview. Internal use."""
         if self._ui_locked:
@@ -168,6 +185,7 @@ class ModMuxWidget(QWidget):
         self.slm.setCenters(center_h, center_v, display=False)
 
         pol = pol_from_masters(h_state["master"], v_state["master"])
+
         if pol is None:
             self.slm.LCOS_Clean()
         else:
@@ -182,19 +200,38 @@ class ModMuxWidget(QWidget):
 
     def _update_preview(self) -> None:
         self._preview.set_hdmi_image(self._hdmi_image())
+        refresh_freq = self.slm.refreshfreq
+        self._update_info_label(f"Mask refreshed at {refresh_freq:.2f} Hz")
+
+    def _update_preview_async(self) -> None:
+        
+        frame = self.slm.read_screen_buffer_async()
+        self._preview.set_hdmi_image(frame)
+        refresh_freq = self.slm.refreshfreq
+        self._update_info_label(f"Mask refreshed at {refresh_freq:.2f} Hz - {UI_LOCKED_TEXT}")
 
     def _update_info_label(self, text: str) -> None:
         """Update the bottom status bar. Call after setmask() or from a timer."""
         self._info_label.setText(text)
 
-    def _disable_user_interface(self) -> None:
+    def disable_user_interface(self) -> None:
         self._ui_locked = True
+    
         for widget in self._user_controls:
             widget.setEnabled(False)
 
-    def _enable_user_interface(self) -> None:
+        self._update_info_label(UI_LOCKED_TEXT)
+        self._start_auto_preview_refresh()
+
+    def enable_user_interface(self) -> None:
+
+        self._stop_auto_preview_refresh()
+        self.refresh_gui_state() #resync all the controls based on the slm object
         for widget in self._user_controls:
             widget.setEnabled(True)
+
         self._panel_h._on_master_toggled(self._panel_h.isChecked())
         self._panel_v._on_master_toggled(self._panel_v.isChecked())
+
         self._ui_locked = False
+        self._stop_auto_preview_refresh()

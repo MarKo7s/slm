@@ -50,8 +50,14 @@ class ModMuxMask:
         mask_size: tuple[int, int],
         Hcenter: tuple[int, int] | None = None,
         Vcenter: tuple[int, int] | None = None,
+        #This are the original before corrections
+        _Hcenter: tuple[int, int] | None = None, 
+        _Vcenter: tuple[int, int] | None = None,
+        _Hcenter_bkp: tuple[int, int] | None = None,
+        _Vcenter_bkp: tuple[int, int] | None = None,
+        
         offset_center: int = 0,
-        ModelabCompatibility: bool = False,
+        ModelabCompatibility: bool = False, #This mirror Y-axis such as original is bottom-left
         pol: Literal['H', 'V', 'HV'] = 'HV',
     ):
         self.aperture_diameter = aperture_diameter
@@ -91,6 +97,10 @@ class ModMuxMask:
         cH = list(map(int, cH))
         cV = list(map(int, cV))
 
+        self._Hcenter = cH
+        self._Vcenter = cV
+
+        # Increasing Y-coordinate move the mask up as the origin is a the bottom left
         if self.ModelabCompatibility:
             cH[1] = self.LCOS_size[0] - (cH[1] + 1)
             cV[1] = self.LCOS_size[0] - (cV[1] + 1)
@@ -98,3 +108,13 @@ class ModMuxMask:
 
         self.Hcenter = [cH[0] - self.offset_center, cH[1] - self.offset_center]
         self.Vcenter = [cV[0] - self.offset_center, cV[1] - self.offset_center]
+
+    def get_centers(self):
+        return self._Hcenter, self._Vcenter
+
+    def backup_centers(self):
+        self._Hcenter_bkp = self._Hcenter
+        self._Vcenter_bkp = self._Vcenter
+
+    def restore_centers(self):
+        self.set_centers(self._Hcenter_bkp, self._Vcenter_bkp) #Set centers already will restore internal _Hcenter and _Vcenter

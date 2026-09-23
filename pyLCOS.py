@@ -1,6 +1,8 @@
 import numpy as np
 import numexpr as ne
 import time
+from threading import Lock
+
 
 from .hdmi.fullscreenqt import FullscreenWindow
 from .utilities.read_specs import load_slm_specs
@@ -42,6 +44,8 @@ class LCOS(FullscreenWindow):
         self.pixel_size  = pixel_size
         self.aperture_diameter = aperture_diameter
         self.masksize = mask_size
+
+        self._screen_buffer_async_lock = Lock()
 
         #Init attenuation pattern use
         att_period = 16
@@ -237,6 +241,16 @@ class LCOS(FullscreenWindow):
             self._display_masks() #display masks without updating the masks
 
         return self
+
+    def restoreCenters(self, display = True):
+        self.ModMuxMask.restore_centers()
+        self.update_centers()
+        if display:
+            self._display_masks()
+
+    def backupCenters(self):
+        self.ModMuxMask.backup_centers()
+        
         
     #Takes new patterns in case you only want to update new patterns on top zernikes attenuation etc etc. Otherwise it will take self parameters and build the mask
     def setmask(self, Hpattern = 0 , Vpattern = 0, pol= None ):
@@ -267,22 +281,42 @@ class LCOS(FullscreenWindow):
     def LCOS_Display(self, arr_data, ch = None):
         if ch is None:
             ch = self.ch
-        self.screen_data[: , :, ch] = arr_data
+
+        with self._screen_buffer_async_lock:
+            self.screen_data[: , :, ch] = arr_data
+
         self.update()
+
+    def read_screen_buffer_async(self, ch = None):
+        """Typically used to read the screen buffer asynchronously. i.e one thread draw mask while other calcualte masks.
+
+        Args:
+            ch (_type_, optional): _description_. Defaults to None.
+
+        Returns:
+            _type_: single channel(color) array of shape (Y,X) 
+        """
+        if ch is None:
+            ch = self.ch
+
+        with self._screen_buffer_async_lock:
+            return self.screen_data[:,:, ch].copy()
     
     def LCOS_Clean(self, ch = None):
         """ Clean the LCOS screen. If ch is None, clean all channels. If ch is provided, clean only the specified channel.
         """
         if ch is None:
-            self.screen_data[: , :, :] *= 0
+            with self._screen_buffer_async_lock:
+                self.screen_data[: , :, :] *= 0
             self.DisplayedLevelMask[:] = 0
             self.DisplayedPhaseMask[:] = 0
         else:
-            self.screen_data[: , :, ch] *= 0
+            with self._screen_buffer_async_lock:
+                self.screen_data[: , :, ch] *= 0
             if ch == self.ch:
                 self.DisplayedLevelMask[:] = 0
                 self.DisplayedPhaseMask[:] = 0
-
+ 
         self.update()
 
     def set_channel(self, channel: int) -> None:

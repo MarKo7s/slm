@@ -38,6 +38,9 @@ class MeadowlarkDriverButton(QPushButton):
     def _on_gui_destroyed(self, *_args) -> None:
         self._gui = None
 
+    def user_controls(self) -> list[QWidget]:
+        return [self]
+
 
 #! LINK ALIAD TO WIDGET
 # alias -> factory(parent) -> widget to pin at the bottom of the controls column
