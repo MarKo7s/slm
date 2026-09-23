@@ -83,6 +83,7 @@ class ModMuxMask:
         )
 
     def set_centers(self, Hcenter: tuple[int, int], Vcenter: tuple[int, int]):
+        
         self._apply_center_corrections(Hcenter, Vcenter)
         self.ap_H, self.ap_V, self.ap = self.aperture.calculate_apertures(
             self.Hcenter, self.Vcenter
@@ -101,6 +102,11 @@ class ModMuxMask:
         self._Hcenter = list(cH)
         self._Vcenter = list(cV)
 
+        limits = (self.LCOS_size[1] - 1, self.LCOS_size[0] - 1)  # x, y
+
+        self._Hcenter = np.clip(self._Hcenter, 0, limits)
+        self._Vcenter = np.clip(self._Vcenter, 0, limits)
+
         # Increasing Y-coordinate move the mask up as the origin is a the bottom left
         if self.ModelabCompatibility:
             cH[1] = self.LCOS_size[0] - (cH[1] + 1)
@@ -109,6 +115,9 @@ class ModMuxMask:
 
         self.Hcenter = [cH[0] - self.offset_center, cH[1] - self.offset_center]
         self.Vcenter = [cV[0] - self.offset_center, cV[1] - self.offset_center]
+
+        self.Hcenter = np.clip(self.Hcenter, 0, limits)
+        self.Vcenter = np.clip(self.Vcenter, 0, limits)
 
     def get_centers(self):
         return self._Hcenter, self._Vcenter

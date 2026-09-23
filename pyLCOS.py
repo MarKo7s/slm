@@ -248,21 +248,16 @@ class LCOS(FullscreenWindow):
 
         slmX = self.LCOSsize[1]
         slmY = self.LCOSsize[0]
-        
-        #masks only can be 1920//2 = 960 -- 960x960 (usefull area) -- If provided masks are bigger they will be cropped -- If they are smaller it will spit an error
-        maxsize = slmX//2
-        lim = maxsize // 2
-        
-        dH = self.masksize
-        mask_centers_H = [dH[0]//2 - self.offset_mask , dH[1]//2 - self.offset_mask] #This is de mask itself not the center on the LCOS
-        cH = self.ModMuxMask.Hcenter #This has extra offset correction and mofied centers if modelab compatibility is on
-        self.LCOS_array_H[cH[1]-lim:cH[1]+lim, cH[0]-lim:cH[0]+lim ] = mask_h[mask_centers_H[1]-lim:mask_centers_H[1]+lim,mask_centers_H[0]-lim:mask_centers_H[0]+lim ] #Assign and crop if its bigger  
-        
-        dV = dH
-        mask_centers_V = [dV[0]//2 - self.offset_mask , dV[1]//2 - self. offset_mask]
-        cV = self.ModMuxMask.Vcenter
-        self.LCOS_array_V[cV[1]-lim:cV[1]+lim, cV[0]-lim:cV[0]+lim ] = mask_v[mask_centers_V[1]-lim:mask_centers_V[1]+lim,mask_centers_V[0]-lim:mask_centers_V[0]+lim ] #Assign and crop if its bigger
+        maskX = self.masksize[1]
+        maskY = self.masksize[0]
 
+        cH = self.ModMuxMask.Hcenter #This has extra offset correction and mofied centers if modelab compatibility is on
+        cV = self.ModMuxMask.Vcenter
+        
+        #Index mask into the LCOS, masks are cropped if they do not fit in the LCOS array
+        self._snapMaskInToLCOS(self.LCOS_array_H, mask_h, cH[0], cH[1], self.offset_mask, maskX, maskY, slmX, slmY)
+        self._snapMaskInToLCOS(self.LCOS_array_V, mask_v, cV[0], cV[1], self.offset_mask, maskX, maskY, slmX, slmY)
+        
         #Reference assignation for simplicity
         a = self.LCOS_array_H
         b = self.ModMuxMask.ap_H 
@@ -280,10 +275,13 @@ class LCOS(FullscreenWindow):
            self.apertureApplied[:] = self.ModMuxMask.ap 
 
 
-    def _snapMaskinToLCOS(self, mask, cx, cy, offset, mskXN, maskYN, LCOSXN, LCOSYN):
+    def _snapMaskInToLCOS(self, LCOS_array, mask, cx, cy, offset, mskXN, maskYN, LCOSXN, LCOSYN):
         # Get mask edges coordinates respect LCOS array
         mx = mskXN//2
         my = maskYN//2
+
+        cx -= offset
+        cy -= offset
 
         # Get mask edges coordinates respect LCOS array - Origin (0,0) is at the top left of the LCOS array
         MEdgeLeft = cx - mx
@@ -303,7 +301,7 @@ class LCOS(FullscreenWindow):
         MCropTop = abs(min(0, MEdgeTop)) # If MEdgeTop is positive, mask fits on the LCOS so start from 0, if negative, get the absolute value as it is the number of pixels to crop
         MCropBottom = min(maskYN, maskYN - (MEdgeBottom - LCOSYN)) 
 
-        self.LCOS_array[LCOSTop:LCOSBottom, LCOSLeft:LCOSRight] = mask[MCropTop:MCropBottom, MCropLeft:MCropRight]
+        LCOS_array[LCOSTop:LCOSBottom, LCOSLeft:LCOSRight] = mask[MCropTop:MCropBottom, MCropLeft:MCropRight]
 
 
     def _update_centers(self):
