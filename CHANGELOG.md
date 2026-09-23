@@ -4,6 +4,18 @@ All notable changes to slm are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.0] - 2026-09-23
+
+### Added
+
+- `LCOS.save()` / `LCOS.load()` persist caller H/V centers in a preamble JSON file. `LCOS` loads `config/modmux_config.json` when `path` is omitted.
+- ModMux panel: Backup / Restore for the in-memory center pair, and Browse / Reload / Save / Save As for the center file.
+
+### Changed
+
+- `setCenters` clips each center to the panel after the Modelab correction (`x` in `0 … width-1`, `y` in `0 … height-1`).
+- Placing an H or V tile crops the part that hangs off the LCOS frame instead of failing the slice assignment.
+
 ## [0.2.0] - 2026-09-16
 
 ### Added

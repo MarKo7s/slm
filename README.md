@@ -13,13 +13,13 @@ Python package name: **`slm`** (GitHub: [MarKo7s/slm](https://github.com/MarKo7s
 ### From GitHub (tagged release)
 
 ```bash
-pip install "slm[notebooks] @ git+https://github.com/MarKo7s/slm.git@v0.2.0"
+pip install "slm[notebooks] @ git+https://github.com/MarKo7s/slm.git@v0.3.0"
 ```
 
 Core only (no Jupyter / pyqtgraph extras):
 
 ```bash
-pip install "slm @ git+https://github.com/MarKo7s/slm.git@v0.2.0"
+pip install "slm @ git+https://github.com/MarKo7s/slm.git@v0.3.0"
 ```
 
 ### Local development (editable install)
@@ -127,6 +127,8 @@ slm = LCOS(
 ```
 
 Both `HmaskCenter` and `VmaskCenter` must be provided together to override defaults at init.
+
+`path` selects the center file. Omitted, `LCOS` loads `config/modmux_config.json` when that file exists. `path=None` keeps the geometric or kwargs centers and does not read a file.
 
 ---
 
@@ -252,6 +254,20 @@ slm.setmask()
 ```
 
 Display coordinates after correction (read-only): `slm.ModMuxMask.Hcenter`, `slm.ModMuxMask.Vcenter`.
+
+`setCenters` clips each center to the panel after the Modelab correction: `x` in `0 … width-1`, `y` in `0 … height-1`. A tile that hangs off the frame is cropped to the overlap. A center at `x = 0` writes the part of the mask that still lands on the panel and drops the rest.
+
+### `save(path=None)` and `load(path=None, display=True)`
+
+Write and read the caller centers. The file starts with a preamble (`schema`, `version`, `saved_at`) and stores H and V as `[x, y]`. An omitted path uses `config/modmux_config.json`. `load` passes those centers through `setCenters`.
+
+```python
+slm.save()                    # config/modmux_config.json
+slm.save("centers.json")
+slm.load("centers.json")
+```
+
+`restore()` is still a stub. In-memory center backup and restore use `backupCenters()` and `restoreCenters()`.
 
 ### `resetAttenuation()`
 
@@ -408,6 +424,8 @@ Requires a running Qt event loop (`QApplication.exec()`).
 | Pattern / Zernike | `mm.H/V.pattern_enabled`, `zernikes_enabled` |
 | **Attenuation** (checkable group + dB spin) | `mm.H/V.att_enabled`, `att_weight` |
 | **Center** (x, y in px) | Per-mask center → `slm.setCenters([h_x, h_y], [v_x, v_y])` |
+| **Backup / Restore** | `slm.backupCenters()` / `slm.restoreCenters()` |
+| **Config** (Browse, Reload, Save, Save As) | `slm.load(path)` / `slm.save(path)` |
 
 ### Sync API
 
@@ -455,6 +473,7 @@ finally:
 | `ui/ModMux/widget.py` | `ModMuxWidget` |
 | `ui/ModMux/pol_mask_panel.py` | Per-pol mask controls (incl. center x/y px) |
 | `ui/ModMux/centers_panel.py` | User ↔ display center coordinate helpers |
+| `ui/utilities/saveWidget.py` | Config Browse / Reload / Save / Save As buttons |
 | `ui/ModMux/preview.py` | LCOS HDMI preview (pyqtgraph) |
 
 <!-- gui-screenshot -->
@@ -471,6 +490,7 @@ finally:
 | `maksSpecs.py` | `ModMuxMask`, `HologramMask`, `Aperture` |
 | `hdmi/fullscreenqt.py` | Qt fullscreen display base class |
 | `config/slm_specs.json` | Named SLM resolutions for auto-detection |
+| `config/modmux_config.json` | Default saved H/V centers |
 | `utilities/displays.py` | Monitor discovery |
 | `ui/ModMux/` | `ModMuxWidget` — MODMUX control panel |
 | `ui/simpleholography/pistoning/` | `PistoningWidget` — quadrant pistoning tool |
@@ -479,8 +499,8 @@ finally:
 
 ## Notes
 
-- **Centers:** always use `slm.setCenters()`. Edit everything else on `slm.ModMuxMask`, then `setmask()`.
-- `save()`, `restore()`, and `load()` on `LCOS` are not implemented yet.
+- **Centers:** always use `slm.setCenters()`. Centers are clipped to the panel, and a tile that hangs off the frame is cropped. Edit everything else on `slm.ModMuxMask`, then `setmask()`.
+- `save()` and `load()` write and read caller centers. `restore()` is not implemented yet.
 - `setmask()` must be called after `resetAttenuation()` or direct `ModMuxMask` content edits to refresh the SLM.
 - For low-level full-frame control without MODMUX, use `LCOS_Display` + `phaseTolevel` directly.
 
