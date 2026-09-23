@@ -1,13 +1,82 @@
+import json
+import time
+import warnings
+from datetime import datetime
+from pathlib import Path
+from threading import Lock
+
 import numpy as np
 import numexpr as ne
-import time
-from threading import Lock
 
 
 from .hdmi.fullscreenqt import FullscreenWindow
 from .utilities.read_specs import load_slm_specs
 from .utilities.displays import find_display, display_discovery
 from .maksSpecs import ModMuxMask
+
+MODMUX_SCHEMA = "slm.modmux"
+MODMUX_VERSION = 1
+_PATH_UNSET = object()
+
+
+def modmux_config_default_path():
+    """Default ModMux center file inside the package config folder."""
+    return Path(__file__).resolve().parent / "config" / "modmux_config.json"
+
+
+def _preamble(saved_at):
+    """File identity written with every ModMux config JSON."""
+    return {
+        "schema": MODMUX_SCHEMA,
+        "version": MODMUX_VERSION,
+        "saved_at": saved_at,
+    }
+
+
+def _center_pair(value, name):
+    """Require an [x, y] pair and return integer caller coordinates."""
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        raise ValueError(f"centers.{name} must be an [x, y] pair.")
+    return [int(value[0]), int(value[1])]
+
+
+def _validate_modmux_config(data):
+    """Validate a ModMux config dict and return its caller centers."""
+    preamble = data.get("preamble")
+    schema = preamble.get("schema") if isinstance(preamble, dict) else None
+    if schema != MODMUX_SCHEMA:
+        raise ValueError(
+            f"ModMux config schema is {schema!r}. Expected {MODMUX_SCHEMA!r}."
+        )
+    version = preamble.get("version")
+    if version != MODMUX_VERSION:
+        raise ValueError(
+            f"Unsupported ModMux config version: {version!r}. Expected {MODMUX_VERSION}."
+        )
+    centers = data.get("centers")
+    if not isinstance(centers, dict):
+        raise ValueError("ModMux config is missing 'centers'.")
+    return {
+        "H": _center_pair(centers.get("H"), "H"),
+        "V": _center_pair(centers.get("V"), "V"),
+    }
+
+
+def _load_modmux_json(path):
+    """Load a ModMux config dictionary from a JSON file."""
+    path = Path(path)
+    with path.open("r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def _save_modmux_json(path, data):
+    """Write a ModMux config dictionary, overwriting an existing file."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        json.dump(data, handle, indent=2)
+        handle.write("\n")
+
 
 class LCOS(FullscreenWindow):
     def __init__(self, screen = 1, channel = 0, pixel_size = 9.2e-6, aperture_diameter = 7.5e-3, mask_size = (960,960), MODELAB_COMPATIBILITY = True,  **kwargs):
@@ -25,7 +94,9 @@ class LCOS(FullscreenWindow):
 
             **kwargs: 
                 zernike_H (array), zernike_V (array), pattern_H (array), pattern_V(array), HmaskCenter ([x,y]), VmaskCenter([x,y]), 
-                polselect('H', 'V' or 'HV'), zernikesEnabled (0 or 1), patternEnabled (0 or 1)
+                polselect('H', 'V' or 'HV'), zernikesEnabled (0 or 1), patternEnabled (0 or 1),
+                path (str | None): ModMux center JSON. Omitted loads config/modmux_config.json.
+                    None keeps the geometric or kwargs centers. Any other path loads that file only.
         """
 
         #Auto detection based on the slm model
@@ -56,7 +127,8 @@ class LCOS(FullscreenWindow):
                                     ModelabCompatibility = MODELAB_COMPATIBILITY, offset_center = 0)
     
         
-        #Init parameters from kwargs or defaults
+        #Init parameters from kwargs or defaults. path is handled after the arrays exist.
+        config_path = kwargs.pop("path", _PATH_UNSET)
         self._init_parameters(self.ModMuxMask, **kwargs) #populates the ModMuxMask object with the kwargs
 
         #Some other extra corrections -> in define center and setmask
@@ -75,6 +147,9 @@ class LCOS(FullscreenWindow):
         self.DisplayedLevelMask = np.zeros(self.LCOSsize, np.uint8) # Final mask from 0 to 255
         
         self.refreshfreq = 0
+        self.config_path = None
+        self.config_saved_at = None
+        self._apply_config_path(config_path)
 
         #Call setmask to display the masks
         self.setmask()
@@ -184,7 +259,7 @@ class LCOS(FullscreenWindow):
         self.LCOS_array_H[cH[1]-lim:cH[1]+lim, cH[0]-lim:cH[0]+lim ] = mask_h[mask_centers_H[1]-lim:mask_centers_H[1]+lim,mask_centers_H[0]-lim:mask_centers_H[0]+lim ] #Assign and crop if its bigger  
         
         dV = dH
-        mask_centers_V = [dV[0]//2 - self.offset_mask , dV[1]//2 -self. offset_mask]
+        mask_centers_V = [dV[0]//2 - self.offset_mask , dV[1]//2 - self. offset_mask]
         cV = self.ModMuxMask.Vcenter
         self.LCOS_array_V[cV[1]-lim:cV[1]+lim, cV[0]-lim:cV[0]+lim ] = mask_v[mask_centers_V[1]-lim:mask_centers_V[1]+lim,mask_centers_V[0]-lim:mask_centers_V[0]+lim ] #Assign and crop if its bigger
 
@@ -202,7 +277,34 @@ class LCOS(FullscreenWindow):
            self.apertureApplied[:] = self.ModMuxMask.ap_V
         elif pol == 'HV':
            ne.evaluate('((a*b + c*d))', out = self.LCOS_array) # the aperture is applied at each pol already
-           self.apertureApplied[:] = self.ModMuxMask.ap  
+           self.apertureApplied[:] = self.ModMuxMask.ap 
+
+
+    def _snapMaskinToLCOS(self, mask, cx, cy, offset, mskXN, maskYN, LCOSXN, LCOSYN):
+        # Get mask edges coordinates respect LCOS array
+        mx = mskXN//2
+        my = maskYN//2
+
+        # Get mask edges coordinates respect LCOS array - Origin (0,0) is at the top left of the LCOS array
+        MEdgeLeft = cx - mx
+        MEdeRight = cx + mx
+        MEdgeTop = cy - my
+        MEdgeBottom = cy + my
+
+        #Indexing coordinates for the LCOS
+        LCOSLeft = max(MEdgeLeft, 0)
+        LCOSRight = min(MEdeRight, LCOSXN)
+        LCOSTop = max(MEdgeTop, 0)
+        LCOSBottom = min(MEdgeBottom, LCOSYN)
+
+        #Maybe we need to crop the mask if edges are out of the LCOS array
+        MCropLeft = abs(min(0, MEdgeLeft)) # If MEdgeLeft is positive, mask fits on the LCOS so start from 0, if negative, get the absolute value as it is the number of pixels to crop
+        MCropRight = min(mskXN, mskXN - (MEdeRight - LCOSXN)) 
+        MCropTop = abs(min(0, MEdgeTop)) # If MEdgeTop is positive, mask fits on the LCOS so start from 0, if negative, get the absolute value as it is the number of pixels to crop
+        MCropBottom = min(maskYN, maskYN - (MEdgeBottom - LCOSYN)) 
+
+        self.LCOS_array[LCOSTop:LCOSBottom, LCOSLeft:LCOSRight] = mask[MCropTop:MCropBottom, MCropLeft:MCropRight]
+
 
     def _update_centers(self):
         """Intermediate method to clean the LCOS array when centers are updated.
@@ -243,14 +345,50 @@ class LCOS(FullscreenWindow):
         return self
 
     def restoreCenters(self, display = True):
+        """Put the backed-up caller centers back through set_centers. No-op if none exist."""
+        if not self.ModMuxMask.has_center_backup():
+            return self
         self.ModMuxMask.restore_centers()
-        self.update_centers()
+        self._update_centers()
         if display:
             self._display_masks()
+        return self
 
     def backupCenters(self):
+        """Copy the current caller centers so restoreCenters can return to them."""
         self.ModMuxMask.backup_centers()
-        
+        return self
+
+    def _apply_config_path(self, path):
+        """Load centers from path. A missing key uses the package default file."""
+        if path is _PATH_UNSET:
+            path = modmux_config_default_path()
+        elif path is None:
+            self._clear_config()
+            return
+
+        path = Path(path)
+        if not path.is_file():
+            warnings.warn(
+                f"{path}: file not found. Keeping current centers.",
+                stacklevel=2,
+            )
+            self._clear_config()
+            return
+        try:
+            self.load(path, display=False)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            warnings.warn(
+                f"{path}: {exc}. Keeping current centers.",
+                stacklevel=2,
+            )
+            self._clear_config()
+
+    def _clear_config(self):
+        """Forget the loaded file and its timestamp."""
+        self.config_path = None
+        self.config_saved_at = None
+
         
     #Takes new patterns in case you only want to update new patterns on top zernikes attenuation etc etc. Otherwise it will take self parameters and build the mask
     def setmask(self, Hpattern = 0 , Vpattern = 0, pol= None ):
@@ -326,12 +464,41 @@ class LCOS(FullscreenWindow):
         self.LCOS_Clean()
         self.ch = channel
 
-    #I got tired.. so I am passing for now
-    def save(self): #Save settings. 
-        pass
+    def save(self, path=None):
+        """Write caller centers to JSON. Omitted path uses config/modmux_config.json."""
+        if path is None:
+            path = modmux_config_default_path()
+        path = Path(path)
+        when = datetime.now().astimezone().replace(microsecond=0)
+        saved_at = when.isoformat(timespec="seconds")
+        center_h, center_v = self.ModMuxMask.get_centers()
+        data = {
+            "preamble": _preamble(saved_at),
+            "centers": {
+                "H": [int(center_h[0]), int(center_h[1])],
+                "V": [int(center_v[0]), int(center_v[1])],
+            },
+        }
+        _save_modmux_json(path, data)
+        self.config_path = str(path.resolve())
+        self.config_saved_at = saved_at
+        return self
+
+    def load(self, path=None, display=True):
+        """Load caller centers from JSON and pass them through setCenters."""
+        if path is None:
+            path = modmux_config_default_path()
+        path = Path(path)
+        data = _load_modmux_json(path)
+        centers = _validate_modmux_config(data)
+        self.setCenters(centers["H"], centers["V"], display=display)
+        self.config_path = str(path.resolve())
+        preamble = data.get("preamble")
+        saved_at = preamble.get("saved_at") if isinstance(preamble, dict) else None
+        self.config_saved_at = saved_at or None
+        return self
+
     def restore(self): #Restore from saved settings
-        pass
-    def load(self,**kwargs): #load from dictionary 
         pass
     
     #Auxialiar methods    

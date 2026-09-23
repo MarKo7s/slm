@@ -1,14 +1,24 @@
 """ModMux control widget — routing and composition flags for an existing LCOS instance."""
 
 import numpy as np
-from PySide6.QtWidgets import QGroupBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget
-from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import (
+    QFileDialog,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
+from PySide6.QtCore import Qt, QTimer
 
+from ...pyLCOS import modmux_config_default_path
+from ..utilities.saveWidget import SaveLoad
 from .centers_panel import display_center_to_user
 from .channel_panel import ChannelPanel
 from .extra_functionalities import create_extra_widgets
 from .pol_mask_panel import PolMaskPanel
-from .preview import LcosPreview
+from .preview import LcosPreview, LcosPreviewHost
 
 def pol_from_masters(h_on: bool, v_on: bool) -> str | None:
     if h_on and v_on:
@@ -39,17 +49,31 @@ class ModMuxWidget(QWidget):
 
         self._panel_h = PolMaskPanel("Mask H", self.width, self.height)
         self._panel_v = PolMaskPanel("Mask V", self.width, self.height)
-        self._channels = ChannelPanel(self.slm.ch)  
+        self._backup_btn = QPushButton("Backup")
+        self._restore_btn = QPushButton("Restore")
+        self._restore_btn.setEnabled(False)
+        self._channels = ChannelPanel(self.slm.ch)
+        self._save_load = SaveLoad(orientation="vertical")
         self._extra_functionality = create_extra_widgets(self.slm.alias, parent = self) #Pass self so we can connect signals
         self._preview = LcosPreview(self.width, self.height, self.slm.ch)
+        self._preview_host = LcosPreviewHost(self._preview)
 
         #! Build a list encapsulating all the user controls, so it is easy to enable and dissable them
-        self._user_controls = self._panel_h.user_controls() + self._panel_v.user_controls() + self._channels.user_controls() 
+        self._user_controls = (
+            self._panel_h.user_controls()
+            + self._panel_v.user_controls()
+            + [self._backup_btn, self._restore_btn]
+            + self._channels.user_controls()
+            + self._save_load.user_controls()
+        )
         for extra in self._extra_functionality:
             self._user_controls.extend(extra.user_controls())
 
         self._info_label = QLabel("")
-        self._info_label.setWordWrap(True)
+        self._info_label.setWordWrap(False)
+        self._config_label = QLabel("No config file")
+        self._config_label.setWordWrap(False)
+        self._config_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         self._auto_preview_refresh_timer = QTimer(self)
         self._auto_preview_refresh_timer.setInterval(100)
@@ -64,7 +88,14 @@ class ModMuxWidget(QWidget):
         controls = QVBoxLayout()
         controls.addWidget(self._panel_h)
         controls.addWidget(self._panel_v)
+
+        backup_row = QHBoxLayout()
+        backup_row.addWidget(self._backup_btn)
+        backup_row.addWidget(self._restore_btn)
+        controls.addLayout(backup_row)
+
         controls.addWidget(self._channels)
+        controls.addWidget(self._save_load)
         controls.addStretch(1)
 
         for widget in self._extra_functionality:
@@ -73,7 +104,7 @@ class ModMuxWidget(QWidget):
         preview_box = QGroupBox("LCOS Panel Viewer")
         preview_layout = QVBoxLayout(preview_box)
         preview_layout.setContentsMargins(4, 8, 4, 4)
-        preview_layout.addWidget(self._preview)
+        preview_layout.addWidget(self._preview_host, stretch=1)
 
         self._hover_label = QLabel("")
         self._hover_label.setWordWrap(True)
@@ -83,7 +114,12 @@ class ModMuxWidget(QWidget):
         body.addLayout(controls, stretch=0)
         body.addWidget(preview_box, stretch=1)
         root.addLayout(body, stretch=1)
-        root.addWidget(self._info_label)
+
+        status = QHBoxLayout()
+        status.addWidget(self._info_label, stretch=0)
+        status.addStretch(1)
+        status.addWidget(self._config_label, stretch=0)
+        root.addLayout(status)
 
     def _connect_signals(self) -> None:
         #! Here connect controls to signals as you need. ie: panels do _on_user_change while channels do _sync_channel
@@ -94,6 +130,12 @@ class ModMuxWidget(QWidget):
                 widget.valueChanged.connect(self._on_user_change)
 
         self._channels.channelChanged.connect(self._sync_channel)
+        self._backup_btn.clicked.connect(self._backup_centers)
+        self._restore_btn.clicked.connect(self._restore_centers)
+        self._save_load.browseClicked.connect(self._browse_config)
+        self._save_load.reloadClicked.connect(self._load_config)
+        self._save_load.saveClicked.connect(self._save_config)
+        self._save_load.saveAsClicked.connect(self._save_config_as)
         self._auto_preview_refresh_timer.timeout.connect(self._update_preview_async)
     
     def _start_auto_preview_refresh(self) -> None:
@@ -142,6 +184,7 @@ class ModMuxWidget(QWidget):
         )
         self._channels.apply_channel(self.slm.ch)
         self._preview.set_channel(self.slm.ch)
+        self._sync_config_buttons()
         self._update_preview()
 
     def _sync_channel(self, channel: int) -> None:
@@ -194,6 +237,64 @@ class ModMuxWidget(QWidget):
 
         self._update_preview()
 
+    def _sync_config_buttons(self) -> None:
+        """Enable Reload and Restore only when a file or a center backup exists."""
+        if self._ui_locked:
+            return
+        self._save_load.set_path(self.slm.config_path)
+        self._update_config_label()
+        self._restore_btn.setEnabled(self.slm.ModMuxMask.has_center_backup())
+
+    def _backup_centers(self) -> None:
+        self.slm.backupCenters()
+        self._sync_config_buttons()
+
+    def _restore_centers(self) -> None:
+        self.slm.restoreCenters()
+        self.refresh_gui_state()
+
+    def _config_dialog_start(self) -> str:
+        return self.slm.config_path or str(modmux_config_default_path())
+
+    def _browse_config(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load ModMux config",
+            self._config_dialog_start(),
+            "JSON files (*.json);;All files (*)",
+        )
+        if not path:
+            return
+        self.slm.load(path)
+        self.refresh_gui_state()
+
+    def _load_config(self) -> None:
+        if not self.slm.config_path:
+            return
+        self.slm.load(self.slm.config_path)
+        self.refresh_gui_state()
+
+    def _save_config(self) -> None:
+        if self.slm.config_path:
+            self.slm.save(self.slm.config_path)
+            self.refresh_gui_state()
+            return
+        self._save_config_as()
+
+    def _save_config_as(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save ModMux config",
+            self._config_dialog_start(),
+            "JSON files (*.json);;All files (*)",
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".json"):
+            path = f"{path}.json"
+        self.slm.save(path)
+        self.refresh_gui_state()
+
     def _hdmi_image(self) -> np.ndarray:
         ch = self.slm.ch
         return self.slm.screen_data[:, :, ch]
@@ -213,6 +314,18 @@ class ModMuxWidget(QWidget):
     def _update_info_label(self, text: str) -> None:
         """Update the bottom status bar. Call after setmask() or from a timer."""
         self._info_label.setText(text)
+
+    def _update_config_label(self) -> None:
+        """Show the stored config path and the JSON saved_at timestamp."""
+        path = self.slm.config_path
+        if not path:
+            self._config_label.setText("No config file")
+            return
+        saved_at = self.slm.config_saved_at
+        if saved_at:
+            self._config_label.setText(f"{path}  {saved_at}")
+            return
+        self._config_label.setText(str(path))
 
     def disable_user_interface(self) -> None:
         self._ui_locked = True
@@ -234,4 +347,5 @@ class ModMuxWidget(QWidget):
         self._panel_v._on_master_toggled(self._panel_v.isChecked())
 
         self._ui_locked = False
+        self._sync_config_buttons()
         self._stop_auto_preview_refresh()

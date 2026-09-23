@@ -71,6 +71,8 @@ class ModMuxMask:
         self.H = HologramMask(mask_size)
         self.V = HologramMask(mask_size)
         self.aperture = Aperture(aperture_diameter, LCOS_size, px_size)
+        self._Hcenter_bkp = None
+        self._Vcenter_bkp = None
 
         default_h, default_v = self._default_centers()
         user_h = Hcenter if Hcenter is not None else default_h
@@ -96,9 +98,8 @@ class ModMuxMask:
         """Apply center corrections if ModelabCompatibility is enabled."""
         cH = list(map(int, cH))
         cV = list(map(int, cV))
-
-        self._Hcenter = cH
-        self._Vcenter = cV
+        self._Hcenter = list(cH)
+        self._Vcenter = list(cV)
 
         # Increasing Y-coordinate move the mask up as the origin is a the bottom left
         if self.ModelabCompatibility:
@@ -112,9 +113,15 @@ class ModMuxMask:
     def get_centers(self):
         return self._Hcenter, self._Vcenter
 
+    def has_center_backup(self) -> bool:
+        return self._Hcenter_bkp is not None and self._Vcenter_bkp is not None
+
     def backup_centers(self):
-        self._Hcenter_bkp = self._Hcenter
-        self._Vcenter_bkp = self._Vcenter
+        self._Hcenter_bkp = list(self._Hcenter)
+        self._Vcenter_bkp = list(self._Vcenter)
 
     def restore_centers(self):
-        self.set_centers(self._Hcenter_bkp, self._Vcenter_bkp) #Set centers already will restore internal _Hcenter and _Vcenter
+        if not self.has_center_backup():
+            return self
+        self.set_centers(self._Hcenter_bkp, self._Vcenter_bkp)
+        return self

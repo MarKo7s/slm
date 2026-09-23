@@ -4,7 +4,8 @@ import math
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QTimer, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from slm.ui.simpleholography.pistoning.colormaps import apply_channel_colormap, level_to_phase
 
@@ -124,3 +125,46 @@ class LcosPreview(pg.ImageView):
             f"phase={phase:.4f} rad  ({math.degrees(phase):.2f}°)"
         )
         self.hoverChanged.emit(text)
+
+
+class LcosPreviewHost(QWidget):
+    """Letterbox an LcosPreview so its widget matches the LCOS aspect ratio."""
+
+    def __init__(self, preview: LcosPreview, parent=None):
+        super().__init__(parent)
+        self.preview = preview
+        preview.setParent(self)
+        preview.setMinimumSize(0, 0)
+        preview.show()
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setAutoFillBackground(True)
+        palette = self.palette()
+        palette.setColor(self.backgroundRole(), Qt.GlobalColor.black)
+        self.setPalette(palette)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._place_preview()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._place_preview()
+
+    def _place_preview(self) -> None:
+        avail_w = self.width()
+        avail_h = self.height()
+        if avail_w < 1 or avail_h < 1 or self.preview.lcos_height < 1:
+            return
+        self.preview.setMinimumSize(0, 0)
+        self.preview.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        aspect = self.preview.lcos_width / self.preview.lcos_height
+        if avail_w / avail_h > aspect:
+            height = avail_h
+            width = max(1, int(round(height * aspect)))
+        else:
+            width = avail_w
+            height = max(1, int(round(width / aspect)))
+        x = (avail_w - width) // 2
+        y = (avail_h - height) // 2
+        self.preview.setGeometry(x, y, width, height)
+        self.preview.fit_to_window()
