@@ -6,7 +6,13 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap, QWheelEvent
-from PySide6.QtWidgets import QGraphicsLineItem, QGraphicsPixmapItem, QGraphicsScene, QGraphicsView
+from PySide6.QtWidgets import (
+    QGraphicsEllipseItem,
+    QGraphicsLineItem,
+    QGraphicsPixmapItem,
+    QGraphicsScene,
+    QGraphicsView,
+)
 
 from .colormaps import apply_channel_colormap, level_to_rgb, phase_to_rgb
 
@@ -36,6 +42,14 @@ def _qt_cut_pens() -> tuple[QPen, QPen]:
     return v_pen, h_pen
 
 
+def _qt_circle_pen() -> QPen:
+    """Disk outline: yellow, cosmetic, slightly stronger than the cut lines."""
+    pen = QPen(QColor(255, 255, 0, 200), 0)
+    pen.setCosmetic(True)
+    pen.setStyle(Qt.PenStyle.SolidLine)
+    return pen
+
+
 def _pg_cut_pens() -> tuple[pg.QtGui.QPen, pg.QtGui.QPen]:
     """Vertical cut: yellow; horizontal cut: cyan. Both solid at 50% alpha."""
     return (
@@ -58,6 +72,10 @@ class PhasePreviewQt(QGraphicsView):
         self.cut_y = height // 2
         self.enable_v_cut = True
         self.enable_h_cut = True
+        self.enable_circular = False
+        self.circle_x = width // 2
+        self.circle_y = height // 2
+        self.radius = max(1, min(width, height) // 4)
         self._drag_axis: str | None = None
         self._min_scale = 1.0
 
@@ -86,6 +104,11 @@ class PhasePreviewQt(QGraphicsView):
         self._h_line.setZValue(1)
         self.scene().addItem(self._h_line)
 
+        self._circle = QGraphicsEllipseItem()
+        self._circle.setPen(_qt_circle_pen())
+        self._circle.setZValue(2)
+        self.scene().addItem(self._circle)
+
         self._sync_cut_lines()
 
     def showEvent(self, event) -> None:
@@ -102,17 +125,40 @@ class PhasePreviewQt(QGraphicsView):
         self.fitInView(self.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
         self._min_scale = self.transform().m11()
 
-    def update_cuts(self, cut_x: int, cut_y: int, enable_v: bool, enable_h: bool) -> None:
+    def update_cuts(
+        self,
+        cut_x: int,
+        cut_y: int,
+        enable_v: bool,
+        enable_h: bool,
+        *,
+        enable_circular: bool = False,
+        circle_x: int = 0,
+        circle_y: int = 0,
+        radius: int = 1,
+    ) -> None:
         self.cut_x, self.cut_y = _clamp_cuts(cut_x, cut_y, self.lcos_width, self.lcos_height)
         self.enable_v_cut = enable_v
         self.enable_h_cut = enable_h
+        self._set_circle(enable_circular, circle_x, circle_y, radius)
         self._sync_cut_lines()
 
+    def _set_circle(self, enable_circular: bool, circle_x: int, circle_y: int, radius: int) -> None:
+        self.enable_circular = enable_circular
+        self.circle_x = int(circle_x)
+        self.circle_y = int(circle_y)
+        self.radius = max(1, int(radius))
+
     def _sync_cut_lines(self) -> None:
-        self._v_line.setVisible(self.enable_v_cut)
-        self._h_line.setVisible(self.enable_h_cut)
+        show_cuts = not self.enable_circular
+        self._v_line.setVisible(self.enable_v_cut and show_cuts)
+        self._h_line.setVisible(self.enable_h_cut and show_cuts)
         self._v_line.setLine(self.cut_x, 0, self.cut_x, self.lcos_height)
         self._h_line.setLine(0, self.cut_y, self.lcos_width, self.cut_y)
+        self._circle.setVisible(self.enable_circular)
+        if self.enable_circular:
+            r = self.radius
+            self._circle.setRect(self.circle_x - r, self.circle_y - r, 2 * r, 2 * r)
 
     def set_phase(self, phase: np.ndarray) -> None:
         rgb = phase_to_rgb(phase, self.channel)
@@ -140,6 +186,10 @@ class PhasePreviewQt(QGraphicsView):
         pos = self.mapToScene(event.position().toPoint())
         tol = self._scene_tolerance()
         self._drag_axis = None
+
+        if self.enable_circular:
+            super().mousePressEvent(event)
+            return
 
         if self.enable_v_cut and abs(pos.x() - self.cut_x) <= tol:
             self._drag_axis = "v"
@@ -200,6 +250,10 @@ class PhasePreviewPyqtgraph(pg.ImageView):
         self.cut_y = height // 2
         self.enable_v_cut = True
         self.enable_h_cut = True
+        self.enable_circular = False
+        self.circle_x = width // 2
+        self.circle_y = height // 2
+        self.radius = max(1, min(width, height) // 4)
         self._did_initial_fit = False
 
         self.ui.roiBtn.hide()
@@ -233,6 +287,10 @@ class PhasePreviewPyqtgraph(pg.ImageView):
         )
         self.view.addItem(self._v_line)
         self.view.addItem(self._h_line)
+
+        self._circle = pg.PlotCurveItem(pen=pg.mkPen((255, 255, 0, 200), width=1))
+        self._circle.setZValue(2)
+        self.view.addItem(self._circle)
 
         self._v_line.sigPositionChanged.connect(self._on_v_line_moved)
         self._h_line.sigPositionChanged.connect(self._on_h_line_moved)
@@ -270,17 +328,33 @@ class PhasePreviewPyqtgraph(pg.ImageView):
             padding=0,
         )
 
-    def update_cuts(self, cut_x: int, cut_y: int, enable_v: bool, enable_h: bool) -> None:
+    def update_cuts(
+        self,
+        cut_x: int,
+        cut_y: int,
+        enable_v: bool,
+        enable_h: bool,
+        *,
+        enable_circular: bool = False,
+        circle_x: int = 0,
+        circle_y: int = 0,
+        radius: int = 1,
+    ) -> None:
         self.cut_x, self.cut_y = _clamp_cuts(cut_x, cut_y, self.lcos_width, self.lcos_height)
         self.enable_v_cut = enable_v
         self.enable_h_cut = enable_h
+        self.enable_circular = enable_circular
+        self.circle_x = int(circle_x)
+        self.circle_y = int(circle_y)
+        self.radius = max(1, int(radius))
         self._sync_cut_lines()
 
     def _sync_cut_lines(self) -> None:
-        self._v_line.setVisible(self.enable_v_cut)
-        self._v_line.setMovable(self.enable_v_cut)
-        self._h_line.setVisible(self.enable_h_cut)
-        self._h_line.setMovable(self.enable_h_cut)
+        show_cuts = not self.enable_circular
+        self._v_line.setVisible(self.enable_v_cut and show_cuts)
+        self._v_line.setMovable(self.enable_v_cut and show_cuts)
+        self._h_line.setVisible(self.enable_h_cut and show_cuts)
+        self._h_line.setMovable(self.enable_h_cut and show_cuts)
 
         self._v_line.blockSignals(True)
         self._h_line.blockSignals(True)
@@ -289,8 +363,17 @@ class PhasePreviewPyqtgraph(pg.ImageView):
         self._v_line.blockSignals(False)
         self._h_line.blockSignals(False)
 
+        self._circle.setVisible(self.enable_circular)
+        if self.enable_circular:
+            theta = np.linspace(0, 2 * np.pi, 256)
+            r = float(self.radius)
+            self._circle.setData(
+                self.circle_x + r * np.cos(theta),
+                self.circle_y + r * np.sin(theta),
+            )
+
     def _on_v_line_moved(self) -> None:
-        if not self.enable_v_cut:
+        if self.enable_circular or not self.enable_v_cut:
             return
         self.cut_x = int(round(self._v_line.value()))
         self.cut_x, self.cut_y = _clamp_cuts(self.cut_x, self.cut_y, self.lcos_width, self.lcos_height)
@@ -299,7 +382,7 @@ class PhasePreviewPyqtgraph(pg.ImageView):
         self.cutsChanged.emit()
 
     def _on_h_line_moved(self) -> None:
-        if not self.enable_h_cut:
+        if self.enable_circular or not self.enable_h_cut:
             return
         self.cut_y = int(round(self._h_line.value()))
         self.cut_x, self.cut_y = _clamp_cuts(self.cut_x, self.cut_y, self.lcos_width, self.lcos_height)

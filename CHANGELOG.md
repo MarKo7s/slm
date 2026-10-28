@@ -4,6 +4,18 @@ All notable changes to slm are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.0] - 2026-10-28
+
+### Added
+
+- Pistoning widget: circular mode fills a disk (inner phase) and the rest of the panel (outer phase) from a radius and center X/Y. Checking Circular clears the vertical and horizontal cuts, and checking either cut clears Circular.
+
+### Changed
+
+- `setCenters` can update one polarization at a time. Pass `None` for the center that should stay put.
+- ModMux panel lock and unlock accept `run_async=True` to run on the next event-loop turn.
+- Default H/V centers in `config/modmux_config.json`.
+
 ## [0.3.0] - 2026-09-23
 
 ### Added

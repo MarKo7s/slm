@@ -328,13 +328,22 @@ class LCOS(FullscreenWindow):
         self.ModMuxMask.V.att_weight = 0
 
     #! Modifying the centers from attributes will not update the apertures. Call this function to update the apertures.
-    def setCenters(self, centerH, centerV, display = True):
+    def setCenters(self, centerH = None, centerV = None, display = True):
         """Update the centers of the H and V masks and display masks on the LCOS.
         Args:
-            centerH (list): Center of the H mask. As [x,y]
-            centerV (list): Center of the V mask. As [x,y]
+            centerH (list | None): Center of the H mask, as [x, y]. None keeps the current H center.
+            centerV (list | None): Center of the V mask, as [x, y]. None keeps the current V center.
             display (bool): Whether to display the masks on the LCOS
         """
+
+        if centerH is None and centerV is None:
+            return
+        ch, cv = self.ModMuxMask.get_centers() #Get current centers.
+        if centerH is None:
+            centerH = ch
+        if centerV is None:
+            centerV = cv
+
         self.ModMuxMask.set_centers(centerH, centerV) #Set center update internally apertures
         self._update_centers() #Update centers basically only clean the LCOS array since apertures are updated internally
         if display:

@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -23,7 +24,9 @@ from slm.utilities.simpleHolography import (
     REGION_BL,
     REGION_BOTTOM,
     REGION_BR,
+    REGION_INNER,
     REGION_LEFT,
+    REGION_OUTER,
     REGION_RIGHT,
     REGION_TL,
     REGION_TOP,
@@ -49,7 +52,19 @@ _REGION_LABELS = {
     REGION_TR: "Top-Right",
     REGION_BL: "Bottom-Left",
     REGION_BR: "Bottom-Right",
+    REGION_INNER: "Inner",
+    REGION_OUTER: "Outer",
 }
+
+
+def _previous_phase(old_keys: list[str], phases: dict[str, float]) -> float:
+    """Pick one phase to carry into a coarser layout."""
+    if REGION_ALL in phases and REGION_ALL in old_keys:
+        return phases[REGION_ALL]
+    for key in old_keys:
+        if key != REGION_INNER and key in phases:
+            return phases[key]
+    return 0.0
 
 
 def _migrate_phases(old_keys: list[str], new_keys: list[str], phases: dict[str, float]) -> dict[str, float]:
@@ -58,6 +73,17 @@ def _migrate_phases(old_keys: list[str], new_keys: list[str], phases: dict[str, 
         return {k: phases.get(k, 0.0) for k in new_keys}
 
     migrated = {k: 0.0 for k in new_keys}
+
+    if new_keys == [REGION_INNER, REGION_OUTER]:
+        migrated[REGION_INNER] = 0.0
+        migrated[REGION_OUTER] = _previous_phase(old_keys, phases)
+        return migrated
+
+    if old_keys == [REGION_INNER, REGION_OUTER]:
+        outer = phases.get(REGION_OUTER, 0.0)
+        for key in new_keys:
+            migrated[key] = outer
+        return migrated
 
     if REGION_ALL in new_keys:
         for key in (REGION_ALL, REGION_TL, REGION_LEFT, REGION_TOP):
@@ -127,7 +153,7 @@ class _RegionControl:
 
 
 class PistoningWidget(QWidget):
-    """Interactive pistoning control with draggable LCOS quadrant cuts.
+    """Interactive pistoning control with draggable LCOS cuts or a circular piston.
 
     Pass an ``slm`` to also push the mask to hardware. Omit ``slm`` and pass
     ``size=(height, width)`` for mask generation / preview only (e.g. embedding
@@ -164,6 +190,7 @@ class PistoningWidget(QWidget):
         self.cut_y = self.height // 2
         self.enable_v_cut = True
         self.enable_h_cut = True
+        self.enable_circular = False
         self.level_mode = False
         self.phase_mask: np.ndarray | None = None
         self._phases: dict[str, float] = {k: 0.0 for k in region_keys(True, True)}
@@ -189,8 +216,11 @@ class PistoningWidget(QWidget):
         self.v_cut_cb.setChecked(True)
         self.h_cut_cb = QCheckBox("Horizontal cut")
         self.h_cut_cb.setChecked(True)
+        self.circular_cb = QCheckBox("Circular")
+        self.circular_cb.setChecked(False)
         cut_row.addWidget(self.v_cut_cb)
         cut_row.addWidget(self.h_cut_cb)
+        cut_row.addWidget(self.circular_cb)
         cut_row.addStretch(1)
         left.addLayout(cut_row)
 
@@ -201,6 +231,22 @@ class PistoningWidget(QWidget):
         self._controls_box = QGroupBox("Phase")
         self._controls_layout = QVBoxLayout(self._controls_box)
         left.addWidget(self._controls_box)
+
+        self._circle_box = QWidget()
+        circle_layout = QVBoxLayout(self._circle_box)
+        circle_layout.setContentsMargins(0, 0, 0, 0)
+        self.radius_spin = self._circle_spin(
+            1,
+            max(self.width, self.height),
+            max(1, min(self.width, self.height) // 4),
+        )
+        self.center_x_spin = self._circle_spin(0, max(0, self.width - 1), self.width // 2)
+        self.center_y_spin = self._circle_spin(0, max(0, self.height - 1), self.height // 2)
+        circle_layout.addLayout(self._labeled_spin("Radius", self.radius_spin))
+        circle_layout.addLayout(self._labeled_spin("Center X", self.center_x_spin))
+        circle_layout.addLayout(self._labeled_spin("Center Y", self.center_y_spin))
+        self._circle_box.setVisible(False)
+        left.addWidget(self._circle_box)
         left.addStretch(1)
 
         self._preview = PhasePreview(self.width, self.height, self.ch)
@@ -218,7 +264,27 @@ class PistoningWidget(QWidget):
 
         self.v_cut_cb.toggled.connect(self._on_cut_toggled)
         self.h_cut_cb.toggled.connect(self._on_cut_toggled)
+        self.circular_cb.toggled.connect(self._on_circular_toggled)
+        self.radius_spin.valueChanged.connect(self._update_display)
+        self.center_x_spin.valueChanged.connect(self._update_display)
+        self.center_y_spin.valueChanged.connect(self._update_display)
         self.level_mode_cb.toggled.connect(self._on_level_mode_toggled)
+
+    @staticmethod
+    def _circle_spin(minimum: int, maximum: int, value: int) -> QSpinBox:
+        spin = QSpinBox()
+        spin.setRange(minimum, max(minimum, maximum))
+        spin.setValue(int(np.clip(value, minimum, max(minimum, maximum))))
+        spin.setMinimumWidth(90)
+        return spin
+
+    @staticmethod
+    def _labeled_spin(label: str, spin: QSpinBox) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.addWidget(QLabel(label))
+        row.addWidget(spin)
+        row.addStretch(1)
+        return row
 
     def _apply_spin_mode(self, control: _RegionControl) -> None:
         spin = control.spin
@@ -236,7 +302,7 @@ class PistoningWidget(QWidget):
     def _rebuild_region_controls(self) -> None:
         old_keys = list(self._region_controls.keys())
         old_values = self._current_values()
-        new_keys = region_keys(self.enable_v_cut, self.enable_h_cut)
+        new_keys = region_keys(self.enable_v_cut, self.enable_h_cut, self.enable_circular)
         self._phases = _migrate_phases(old_keys, new_keys, old_values)
 
         while self._controls_layout.count():
@@ -263,13 +329,41 @@ class PistoningWidget(QWidget):
         return dict(self._phases)
 
     def _sync_cut_lines(self) -> None:
-        self._preview.update_cuts(self.cut_x, self.cut_y, self.enable_v_cut, self.enable_h_cut)
+        self._preview.update_cuts(
+            self.cut_x,
+            self.cut_y,
+            self.enable_v_cut,
+            self.enable_h_cut,
+            enable_circular=self.enable_circular,
+            circle_x=self.center_x_spin.value(),
+            circle_y=self.center_y_spin.value(),
+            radius=self.radius_spin.value(),
+        )
 
-    def _on_cut_toggled(self, _checked: bool) -> None:
+    def _apply_cut_state(self) -> None:
         self.enable_v_cut = self.v_cut_cb.isChecked()
         self.enable_h_cut = self.h_cut_cb.isChecked()
+        self.enable_circular = self.circular_cb.isChecked()
+        self._circle_box.setVisible(self.enable_circular)
         self._rebuild_region_controls()
         self._update_display()
+
+    def _on_circular_toggled(self, checked: bool) -> None:
+        if checked:
+            self.v_cut_cb.blockSignals(True)
+            self.h_cut_cb.blockSignals(True)
+            self.v_cut_cb.setChecked(False)
+            self.h_cut_cb.setChecked(False)
+            self.v_cut_cb.blockSignals(False)
+            self.h_cut_cb.blockSignals(False)
+        self._apply_cut_state()
+
+    def _on_cut_toggled(self, checked: bool) -> None:
+        if checked and self.circular_cb.isChecked():
+            self.circular_cb.blockSignals(True)
+            self.circular_cb.setChecked(False)
+            self.circular_cb.blockSignals(False)
+        self._apply_cut_state()
 
     def _on_level_mode_toggled(self, enabled: bool) -> None:
         values = self._current_values()
@@ -326,6 +420,7 @@ class PistoningWidget(QWidget):
         self._update_display()
 
     def _update_display(self) -> None:
+        self._sync_cut_lines()
         values = self._current_values()
         mask = pistoning_phase_mask(
             (self.height, self.width),
@@ -334,6 +429,10 @@ class PistoningWidget(QWidget):
             self.enable_v_cut,
             self.enable_h_cut,
             values,
+            enable_circular=self.enable_circular,
+            center_x=self.center_x_spin.value(),
+            center_y=self.center_y_spin.value(),
+            radius=self.radius_spin.value(),
         )
 
         if self.level_mode:

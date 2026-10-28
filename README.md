@@ -13,13 +13,13 @@ Python package name: **`slm`** (GitHub: [MarKo7s/slm](https://github.com/MarKo7s
 ### From GitHub (tagged release)
 
 ```bash
-pip install "slm[notebooks] @ git+https://github.com/MarKo7s/slm.git@v0.3.0"
+pip install "slm[notebooks] @ git+https://github.com/MarKo7s/slm.git@v0.4.0"
 ```
 
 Core only (no Jupyter / pyqtgraph extras):
 
 ```bash
-pip install "slm @ git+https://github.com/MarKo7s/slm.git@v0.3.0"
+pip install "slm @ git+https://github.com/MarKo7s/slm.git@v0.4.0"
 ```
 
 ### Local development (editable install)
@@ -234,9 +234,9 @@ print(slm.refreshfreq)
 - Pass `Hpattern=0` / `Vpattern=0` to leave that pattern unchanged.
 - Phase on each tile should be in **radians**, roughly −π…π.
 
-### `setCenters(centerH, centerV, display=True)`
+### `setCenters(centerH=None, centerV=None, display=True)`
 
-**Required for any center change.** Accepts user/Modelab coordinates, applies corrections, recalculates apertures, and clears LCOS placement buffers.
+**Required for any center change.** Accepts user/Modelab coordinates, applies corrections, recalculates apertures, and clears LCOS placement buffers. Pass `None` for `centerH` or `centerV` to leave that polarization where it is.
 
 | `display` | Behavior |
 |-----------|----------|
@@ -493,7 +493,7 @@ finally:
 | `config/modmux_config.json` | Default saved H/V centers |
 | `utilities/displays.py` | Monitor discovery |
 | `ui/ModMux/` | `ModMuxWidget` — MODMUX control panel |
-| `ui/simpleholography/pistoning/` | `PistoningWidget` — quadrant pistoning tool |
+| `ui/simpleholography/pistoning/` | `PistoningWidget` — quadrant and circular pistoning |
 
 ---
 

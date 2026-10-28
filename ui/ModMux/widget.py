@@ -327,16 +327,26 @@ class ModMuxWidget(QWidget):
             return
         self._config_label.setText(str(path))
 
-    def disable_user_interface(self) -> None:
+    def disable_user_interface(self, run_async = False) -> None:
+        if run_async:
+            QTimer.singleShot(0, self, self._disable_user_interface)
+        else:
+            self._disable_user_interface()
+
+    def _disable_user_interface(self) -> None:
         self._ui_locked = True
-    
         for widget in self._user_controls:
             widget.setEnabled(False)
-
         self._update_info_label(UI_LOCKED_TEXT)
         self._start_auto_preview_refresh()
 
-    def enable_user_interface(self) -> None:
+    def enable_user_interface(self, run_async = False) -> None:
+        if run_async:
+            QTimer.singleShot(0, self, self._enable_user_interface)
+        else:
+            self._enable_user_interface()
+
+    def _enable_user_interface(self) -> None:
 
         self._stop_auto_preview_refresh()
         self.refresh_gui_state() #resync all the controls based on the slm object
